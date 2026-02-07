@@ -1,0 +1,19 @@
+{
+  "name": "ai-drive-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run -ws build",
+    "dev": "sh -c '(lsof -ti tcp:3000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4100 | xargs kill -9) 2>/dev/null || true; PORT=4100 npm run -w @aidrive/api dev & NEXT_PUBLIC_API_URL=http://127.0.0.1:4100 npm run -w @aidrive/web dev & wait'",
+    "dev:reset": "npm run dev",
+    "test": "npm run -w @aidrive/api test",
+    "lint": "npm run -ws lint"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

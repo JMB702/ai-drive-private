@@ -1,0 +1,13 @@
+{
+  "name": "@aidrive/premiere-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'Plugin build pipeline placeholder'",
+    "lint": "echo 'Plugin lint placeholder'"
+  },
+  "dependencies": {
+    "@aidrive/sdk": "0.1.0"
+  }
+}
