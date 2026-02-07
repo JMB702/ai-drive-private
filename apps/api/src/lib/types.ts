@@ -29,6 +29,8 @@ export interface InMemoryStore {
   moderationEvents: ModerationEvent[];
   auditEvents: AuditEvent[];
   workspaceCreditBalance: Record<string, number>;
+  folderLayouts: Record<string, string[]>;
+  workspaceFolderOrder: Record<string, string[]>;
 }
 
 export interface RuntimeEvents {

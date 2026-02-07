@@ -40,6 +40,19 @@ const copySchema = z.object({
   folderId: z.string().nullable().optional()
 });
 
+const patchFolderLayoutSchema = z.object({
+  customOrderAssetIds: z.array(z.string())
+});
+
+const batchMoveSchema = z.object({
+  assetIds: z.array(z.string()).min(1),
+  folderId: z.string().nullable()
+});
+
+const batchIdsSchema = z.object({
+  assetIds: z.array(z.string()).min(1)
+});
+
 function canWriteAsset(app: FastifyInstance, workspaceId: string, assetId: string, request: any): boolean {
   const { actorId, role } = requireWorkspaceMember(request, workspaceId);
   return resolveEffectivePermission({
@@ -84,7 +97,43 @@ export async function registerDriveRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/drive/folders/:workspaceId", async (request) => {
     const { workspaceId } = request.params as { workspaceId: string };
     requireWorkspaceMember(request, workspaceId);
-    return { folders: app.ctx.store.folders.filter((f) => f.workspaceId === workspaceId && !f.deletedAt) };
+    const folders = app.ctx.store.folders
+      .filter((f) => f.workspaceId === workspaceId && !f.deletedAt)
+      .map((folder) => ({
+        ...folder,
+        layout: {
+          customOrderAssetIds: app.ctx.store.folderLayouts[folder.id] ?? []
+        }
+      }));
+    return { folders };
+  });
+
+  app.patch("/v1/drive/folders/:folderId/layout", async (request, reply) => {
+    const { folderId } = request.params as { folderId: string };
+    const body = patchFolderLayoutSchema.parse(request.body);
+    const folder = app.ctx.store.folders.find((item) => item.id === folderId && !item.deletedAt);
+    if (!folder) {
+      return reply.status(404).send({ error: "Folder not found" });
+    }
+
+    const actor = requireWorkspaceMember(request, folder.workspaceId);
+    const allowed = resolveEffectivePermission({
+      grants: app.ctx.store.permissionGrants,
+      role: actor.role,
+      principalId: actor.actorId,
+      action: "folder:write",
+      resourceType: "WORKSPACE",
+      resourceId: folder.workspaceId
+    });
+    if (!allowed) {
+      return reply.status(403).send({ error: "No permission to update folder layout" });
+    }
+
+    const assetIdsInFolder = new Set(
+      app.ctx.store.assets.filter((asset) => asset.folderId === folderId && !asset.deletedAt).map((asset) => asset.id)
+    );
+    app.ctx.store.folderLayouts[folderId] = body.customOrderAssetIds.filter((assetId) => assetIdsInFolder.has(assetId));
+    return { folderId, customOrderAssetIds: app.ctx.store.folderLayouts[folderId] };
   });
 
   app.post("/v1/drive/assets", async (request, reply) => {
@@ -165,6 +214,76 @@ export async function registerDriveRoutes(app: FastifyInstance): Promise<void> {
       metadata: body.metadata
     });
     return reply.code(201).send({ version });
+  });
+
+  app.post("/v1/drive/assets/batch-move", async (request, reply) => {
+    const body = batchMoveSchema.parse(request.body);
+    const sourceAssets = app.ctx.store.assets.filter((asset) => body.assetIds.includes(asset.id));
+    if (sourceAssets.length !== body.assetIds.length) {
+      return reply.status(404).send({ error: "One or more assets not found" });
+    }
+
+    for (const asset of sourceAssets) {
+      if (!canWriteAsset(app, asset.workspaceId, asset.id, request)) {
+        return reply.status(403).send({ error: "No permission to move one or more assets" });
+      }
+    }
+
+    if (body.folderId) {
+      const destination = app.ctx.store.folders.find((folder) => folder.id === body.folderId && !folder.deletedAt);
+      if (!destination) {
+        return reply.status(404).send({ error: "Destination folder not found" });
+      }
+      for (const asset of sourceAssets) {
+        if (asset.workspaceId !== destination.workspaceId) {
+          return reply.status(400).send({ error: "Cross-workspace move not allowed" });
+        }
+      }
+    }
+
+    const moved = sourceAssets.map((asset) => {
+      asset.folderId = body.folderId;
+      return asset;
+    });
+    return { movedCount: moved.length, assets: moved };
+  });
+
+  app.delete("/v1/drive/assets/batch", async (request, reply) => {
+    const body = batchIdsSchema.parse(request.body);
+    const assets = app.ctx.store.assets.filter((asset) => body.assetIds.includes(asset.id));
+    if (assets.length !== body.assetIds.length) {
+      return reply.status(404).send({ error: "One or more assets not found" });
+    }
+
+    for (const asset of assets) {
+      if (!canWriteAsset(app, asset.workspaceId, asset.id, request)) {
+        return reply.status(403).send({ error: "No permission to delete one or more assets" });
+      }
+    }
+
+    for (const asset of assets) {
+      asset.deletedAt = nowIso();
+    }
+    return { deletedCount: assets.length };
+  });
+
+  app.post("/v1/drive/assets/batch-restore", async (request, reply) => {
+    const body = batchIdsSchema.parse(request.body);
+    const assets = app.ctx.store.assets.filter((asset) => body.assetIds.includes(asset.id));
+    if (assets.length !== body.assetIds.length) {
+      return reply.status(404).send({ error: "One or more assets not found" });
+    }
+
+    for (const asset of assets) {
+      if (!canWriteAsset(app, asset.workspaceId, asset.id, request)) {
+        return reply.status(403).send({ error: "No permission to restore one or more assets" });
+      }
+    }
+
+    for (const asset of assets) {
+      asset.deletedAt = null;
+    }
+    return { restoredCount: assets.length, assets };
   });
 
   app.post("/v1/drive/assets/:assetId/move", async (request, reply) => {

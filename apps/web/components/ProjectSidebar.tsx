@@ -1,13 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { readDraggedAssetIds } from "../lib/projects";
 import { useProjects } from "./ProjectsProvider";
 
 export function ProjectSidebar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { folders, selectedProjectId, selectProject, setCreateModalOpen } = useProjects();
+  const { folders, selectedProjectId, selectProject, setCreateModalOpen, moveItemsToFolder } = useProjects();
+  const [dropProjectId, setDropProjectId] = useState<string | null>(null);
 
   function openProject(projectId: string) {
     selectProject(projectId);
@@ -43,8 +46,20 @@ export function ProjectSidebar() {
           folders.map((folder) => (
             <button
               key={folder.id}
-              className={`project-link ${folder.id === selectedProjectId ? "selected" : ""}`}
+              className={`project-link ${folder.id === selectedProjectId ? "selected" : ""} ${dropProjectId === folder.id ? "drop-target" : ""}`}
               onClick={() => openProject(folder.id)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDropProjectId(folder.id);
+              }}
+              onDragLeave={() => setDropProjectId((current) => (current === folder.id ? null : current))}
+              onDrop={(event) => {
+                const ids = readDraggedAssetIds(event);
+                if (ids.length === 0) return;
+                event.preventDefault();
+                setDropProjectId(null);
+                void moveItemsToFolder(ids, folder.id);
+              }}
             >
               <span>{folder.name}</span>
             </button>

@@ -15,7 +15,9 @@ export function createStore(): InMemoryStore {
     creditTransactions: [],
     moderationEvents: [],
     auditEvents: [],
-    workspaceCreditBalance: {}
+    workspaceCreditBalance: {},
+    folderLayouts: {},
+    workspaceFolderOrder: {}
   };
 }
 

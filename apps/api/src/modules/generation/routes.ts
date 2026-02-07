@@ -15,6 +15,12 @@ const generationRequestSchema = z.object({
   settings: z.record(z.union([z.string(), z.number(), z.boolean()])).default({})
 });
 
+const batchMoveJobsSchema = z.object({
+  workspaceId: z.string(),
+  jobIds: z.array(z.string()).min(1),
+  folderId: z.string()
+});
+
 function isPromptBlocked(prompt: string): boolean {
   const blockedTokens = ["csam", "terror propaganda", "explicit minor"];
   const lower = prompt.toLowerCase();
@@ -163,6 +169,38 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
       .filter((j) => j.workspaceId === workspaceId)
       .filter((j) => actor.role === "OWNER" || actor.role === "ADMIN" || j.createdBy === actor.actorId);
     return { jobs };
+  });
+
+  app.post("/v1/generation/jobs/batch-move", async (request, reply) => {
+    const body = batchMoveJobsSchema.parse(request.body);
+    const actor = requireWorkspaceMember(request, body.workspaceId);
+    const destination = app.ctx.store.folders.find((folder) => folder.id === body.folderId && !folder.deletedAt);
+    if (!destination) {
+      return reply.status(404).send({ error: "Destination folder not found" });
+    }
+    if (destination.workspaceId !== body.workspaceId) {
+      return reply.status(400).send({ error: "Destination folder is outside workspace" });
+    }
+
+    const jobs = app.ctx.store.generationJobs.filter((job) => body.jobIds.includes(job.id));
+    if (jobs.length !== body.jobIds.length) {
+      return reply.status(404).send({ error: "One or more jobs not found" });
+    }
+
+    const forbidden = jobs.some((job) =>
+      job.workspaceId !== body.workspaceId ||
+      (job.createdBy !== actor.actorId && actor.role !== "OWNER" && actor.role !== "ADMIN") ||
+      (job.status !== "QUEUED" && job.status !== "RUNNING") ||
+      job.request.type !== "IMAGE"
+    );
+    if (forbidden) {
+      return reply.status(403).send({ error: "One or more jobs cannot be moved" });
+    }
+
+    for (const job of jobs) {
+      job.request.folderId = body.folderId;
+    }
+    return { movedCount: jobs.length, jobs };
   });
 
   app.post("/v1/generation/jobs/:jobId/cancel", async (request) => {

@@ -1,12 +1,53 @@
 "use client";
 
+import { useEffect, useMemo } from "react";
 import { fallbackImagePreview, resolveAssetPreview } from "../lib/projects";
 import { useProjects } from "./ProjectsProvider";
 
 export function AssetViewerModal() {
-  const { selectedAsset, selectedAssetVersions, versionsLoading, closeAsset } = useProjects();
+  const { selectedAsset, selectedAssetVersions, versionsLoading, closeAsset, selectedProjectVisibleAssets, openAsset } = useProjects();
 
   if (!selectedAsset) return null;
+
+  const selectedIndex = useMemo(
+    () => selectedProjectVisibleAssets.findIndex((asset) => asset.id === selectedAsset.id),
+    [selectedAsset.id, selectedProjectVisibleAssets]
+  );
+  const prevAsset = selectedIndex > 0 ? selectedProjectVisibleAssets[selectedIndex - 1] : null;
+  const nextAsset = selectedIndex >= 0 && selectedIndex < selectedProjectVisibleAssets.length - 1
+    ? selectedProjectVisibleAssets[selectedIndex + 1]
+    : null;
+
+  function openPrevious(): void {
+    if (!prevAsset) return;
+    void openAsset(prevAsset);
+  }
+
+  function openNext(): void {
+    if (!nextAsset) return;
+    void openAsset(nextAsset);
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        if (prevAsset) {
+          void openAsset(prevAsset);
+        }
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (nextAsset) {
+          void openAsset(nextAsset);
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeAsset();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeAsset, nextAsset, openAsset, prevAsset]);
 
   const latest = selectedAssetVersions[0] ?? null;
   const prompt = latest?.metadata?.prompt;
@@ -19,6 +60,19 @@ export function AssetViewerModal() {
         <button className="asset-close" onClick={closeAsset}>×</button>
 
         <div className="asset-stage">
+          <button
+            className={`asset-nav asset-nav-left ${prevAsset ? "" : "disabled"}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              openPrevious();
+            }}
+            aria-label="Previous image"
+            disabled={!prevAsset}
+          >
+            ‹
+          </button>
+
           <img
             src={resolveAssetPreview(selectedAsset)}
             alt={selectedAsset.name}
@@ -30,6 +84,19 @@ export function AssetViewerModal() {
               element.src = fallbackImagePreview(selectedAsset.id);
             }}
           />
+
+          <button
+            className={`asset-nav asset-nav-right ${nextAsset ? "" : "disabled"}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              openNext();
+            }}
+            aria-label="Next image"
+            disabled={!nextAsset}
+          >
+            ›
+          </button>
         </div>
 
         <aside className="asset-side">

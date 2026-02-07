@@ -114,4 +114,46 @@ describe("api route integration", () => {
     expect(res.statusCode).toBe(200);
     expect(typeof res.json().allowed).toBe("boolean");
   });
+
+  it("persists folder layout and batch moves assets", async () => {
+    const foldersRes = await app.inject({
+      method: "GET",
+      url: "/v1/drive/folders/ws_demo",
+      headers: { "x-user-id": "user_demo" }
+    });
+    const [folderA, folderB] = foldersRes.json().folders;
+
+    const a1 = await app.inject({
+      method: "POST",
+      url: "/v1/drive/assets",
+      headers: { "x-user-id": "user_demo" },
+      payload: { workspaceId: "ws_demo", folderId: folderA.id, name: "a1.png", mimeType: "image/png", tags: [] }
+    });
+    const a2 = await app.inject({
+      method: "POST",
+      url: "/v1/drive/assets",
+      headers: { "x-user-id": "user_demo" },
+      payload: { workspaceId: "ws_demo", folderId: folderA.id, name: "a2.png", mimeType: "image/png", tags: [] }
+    });
+    const asset1 = a1.json().asset;
+    const asset2 = a2.json().asset;
+
+    const layoutRes = await app.inject({
+      method: "PATCH",
+      url: `/v1/drive/folders/${folderA.id}/layout`,
+      headers: { "x-user-id": "user_demo" },
+      payload: { customOrderAssetIds: [asset2.id, asset1.id] }
+    });
+    expect(layoutRes.statusCode).toBe(200);
+    expect(layoutRes.json().customOrderAssetIds).toEqual([asset2.id, asset1.id]);
+
+    const moveRes = await app.inject({
+      method: "POST",
+      url: "/v1/drive/assets/batch-move",
+      headers: { "x-user-id": "user_demo" },
+      payload: { assetIds: [asset1.id, asset2.id], folderId: folderB.id }
+    });
+    expect(moveRes.statusCode).toBe(200);
+    expect(moveRes.json().movedCount).toBe(2);
+  });
 });

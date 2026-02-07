@@ -16,6 +16,7 @@ import { createContext } from "./lib/context.js";
 import { seedData } from "./lib/seed.js";
 import { DomainError } from "./lib/errors.js";
 import { loadEnv } from "./config/env.js";
+import { loadPersistedStore, savePersistedStore } from "./lib/persistence.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -23,7 +24,33 @@ export async function buildApp() {
 
   const env = loadEnv();
   const ctx = createContext(createAdapters(env));
-  seedData(ctx);
+  const persisted = loadPersistedStore();
+  if (persisted) {
+    Object.assign(ctx.store, persisted.store);
+    app.log.info(`Loaded persisted store from ${persisted.sourcePath}`);
+  } else {
+    seedData(ctx);
+  }
+
+  const persistenceTimer = setInterval(() => {
+    try {
+      const savedPath = savePersistedStore(ctx.store);
+      app.log.debug(`Persisted store to ${savedPath}`);
+    } catch (error) {
+      app.log.error(error);
+    }
+  }, 1500);
+  persistenceTimer.unref();
+
+  app.addHook("onClose", async () => {
+    clearInterval(persistenceTimer);
+    try {
+      savePersistedStore(ctx.store);
+    } catch (error) {
+      app.log.error(error);
+    }
+  });
+
   app.decorate("ctx", ctx);
 
   app.setErrorHandler((error, _request, reply) => {
