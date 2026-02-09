@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012723-audit-and-backfill-missing-thread-summaries",
+  "createdAt": "2026-02-09T01:27:23.105Z",
+  "title": "Audit and backfill missing thread summaries",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Several recent delegation packages may be done in sub-threads but do not have corresponding summary entries in docs/master-control.md.",
+  "fullPrompt": "Audit recent delegation packages and cross-check against Thread Summaries. Identify packages likely completed without summaries and create a precise missing-summary list (thread, package id, task title). For each missing item, issue a summary-backfill request format that can be pasted into the responsible thread. Validate after backfill.",
+  "doneCriteria": "Missing-summary report produced with concrete package/thread mapping and a verified backfill workflow.",
+  "reportBack": "Append summary to docs/master-control.md with audit findings, missing items, and verification status after backfill.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

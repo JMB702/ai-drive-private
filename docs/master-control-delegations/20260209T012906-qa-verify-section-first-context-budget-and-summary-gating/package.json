@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012906-qa-verify-section-first-context-budget-and-summary-gating",
+  "createdAt": "2026-02-09T01:29:06.391Z",
+  "title": "QA verify section-first context budget and summary gating",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Need confirmation that PM can operate from section summaries without full-plan load and that completion-without-summary is treated as non-compliant.",
+  "fullPrompt": "After UI + lifecycle rule changes land, run QA scenarios: 1) master plan default view shows section summaries only, 2) detail loads only on explicit expand, 3) starter packet still copyable, 4) tasks without summary are flagged as not complete per updated rules. Capture pass/fail with repro steps and evidence.",
+  "doneCriteria": "QA evidence confirms section-first behavior and summary-gating behavior, with any regressions documented.",
+  "reportBack": "Append summary to docs/master-control.md with results, evidence, and open issues.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012854-implement-master-plan-first-sectioned-ui-and-selective-expan",
+  "createdAt": "2026-02-09T01:28:54.827Z",
+  "title": "Implement master-plan-first sectioned UI and selective expand",
+  "targetThread": "Master Control UI",
+  "problem": "Need the UI to be planning-first with context-safe reading. PM should see section summaries first and expand only relevant sections.",
+  "fullPrompt": "Implement a Master Plan primary panel in Master Control Ops. The panel must default to section index view: section title, one-line summary, status, owner, last updated, unread recommendation count. Add explicit expand control per section to load detailed content on demand only. Keep Project Manager Starter Packet visible but secondary. Add visible copy confirmation for starter packet if not already obvious. Completion is not done until summary is appended to docs/master-control.md.",
+  "doneCriteria": "Master Plan is front-center. Default view is section summaries/index only. Detail loads only on explicit expand. Starter packet remains copyable and secondary. Summary appended.",
+  "reportBack": "Append summary to docs/master-control.md with files changed, UI behavior, and any integration gaps.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Moderate implementation scope with some reasoning depth.",
+  "suggestedEffort": "medium",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

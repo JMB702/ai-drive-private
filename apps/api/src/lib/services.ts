@@ -18,6 +18,8 @@ import type {
 import type { InMemoryStore } from "./types.js";
 import { DomainError } from "./errors.js";
 import { nowIso } from "./time.js";
+import { diagnoseGenerationFailure } from "./generation-failure.js";
+import { previewBlobKeyFromStorageKey, previewBlobUrl, sanitizeInlinePreviewMetadata } from "./media-preview.js";
 
 const roleActionMap: Record<Role, string[]> = {
   OWNER: ["workspace:*", "asset:*", "folder:*", "generate:*", "billing:*"],
@@ -40,7 +42,9 @@ export function resolveEffectivePermission(params: {
   resourceId: string;
 }): boolean {
   const roleAllowed = canRole(params.role, params.action);
-  const matching = params.grants.filter((g) =>
+  const grantList = Array.isArray(params.grants) ? params.grants : [];
+  const matching = grantList.filter((g) =>
+    g &&
     g.resourceType === params.resourceType &&
     g.resourceId === params.resourceId &&
     g.action === params.action &&
@@ -79,12 +83,35 @@ export function createAssetVersion(params: {
 
   const nextVersion = params.store.versions.filter((v) => v.assetId === params.assetId).length + 1;
 
+  const storagePreviewBlob = previewBlobKeyFromStorageKey(params.storageKey);
+  if (storagePreviewBlob && typeof params.metadata.previewBlob !== "string") {
+    params.metadata.previewBlob = storagePreviewBlob;
+    if (typeof params.metadata.previewUrl !== "string" || params.metadata.previewUrl.length === 0) {
+      params.metadata.previewUrl = previewBlobUrl(storagePreviewBlob);
+    }
+  }
+
+  sanitizeInlinePreviewMetadata(params.metadata);
+  let resolvedStorageKey = params.storageKey;
+  const previewBlob = typeof params.metadata.previewBlob === "string"
+    ? params.metadata.previewBlob
+    : null;
+  if (
+    previewBlob &&
+    /^(generated|failed|blocked)\//.test(resolvedStorageKey)
+  ) {
+    const normalizedPreviewBlob = previewBlobKeyFromStorageKey(`previews/${previewBlob}`);
+    if (normalizedPreviewBlob) {
+      resolvedStorageKey = `previews/${normalizedPreviewBlob}`;
+    }
+  }
+
   const version: AssetVersion = {
     id: nanoid(),
     assetId: params.assetId,
     version: nextVersion,
     source: params.source,
-    storageKey: params.storageKey,
+    storageKey: resolvedStorageKey,
     checksum: params.checksum,
     metadata: params.metadata,
     createdBy: params.createdBy,
@@ -240,18 +267,30 @@ export async function executeGeneration(
 ): Promise<GenerationJob> {
   job.status = "RUNNING";
   job.updatedAt = nowIso();
-  const adapter = selectAdapter(adapters, job.request.model);
-
+  job.failure = null;
+  let provider = "unknown";
   try {
+    const adapter = selectAdapter(adapters, job.request.model);
+    provider = adapter.key;
     const result: GenerationResult = await adapter.submit(job.request);
+    sanitizeInlinePreviewMetadata(result.providerMetadata);
     job.status = "SUCCEEDED";
-    job.result = result;
+    job.result = {
+      ...result
+    };
     job.error = null;
+    job.failure = null;
     job.updatedAt = nowIso();
     return job;
   } catch (error) {
+    const failure = diagnoseGenerationFailure({
+      request: job.request,
+      provider,
+      error
+    });
     job.status = "FAILED";
-    job.error = error instanceof Error ? error.message : "Generation failed";
+    job.error = failure.userMessage;
+    job.failure = failure;
     job.updatedAt = nowIso();
     return job;
   }
@@ -272,6 +311,7 @@ export function createGenerationJob(params: {
     request: params.request,
     result: null,
     error: null,
+    failure: null,
     reservedCredits: params.reservedCredits,
     createdAt: now,
     updatedAt: now

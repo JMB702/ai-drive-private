@@ -7,9 +7,12 @@
     "packages/*"
   ],
   "scripts": {
+    "build:prod": "npm run -w @aidrive/shared build && npm run -w @aidrive/sdk build && npm run -w @aidrive/api build && npm run -w @aidrive/web build",
     "build": "npm run -ws build",
-    "dev": "sh -c '(lsof -ti tcp:3000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4100 | xargs kill -9) 2>/dev/null || true; PORT=4100 npm run -w @aidrive/api dev & NEXT_PUBLIC_API_URL=http://127.0.0.1:4100 npm run -w @aidrive/web dev & wait'",
-    "dev:reset": "npm run dev",
+    "dev": "npm run dev:stop && node scripts/dev-supervisor.mjs",
+    "dev:stop": "sh -c '(pkill -f \"next dev\" || true); (pkill -f \"tsx watch src/server.ts\" || true); (lsof -ti tcp:3000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4100 | xargs kill -9) 2>/dev/null || true'",
+    "dev:reset": "npm run -w @aidrive/web clean && npm run dev",
+    "start:prod": "node scripts/prod-supervisor.mjs",
     "test": "npm run -w @aidrive/api test",
     "lint": "npm run -ws lint"
   },

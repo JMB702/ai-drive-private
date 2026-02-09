@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T232557-mc-optimization-model-heuristic-calibration",
+  "createdAt": "2026-02-08T23:25:57.258Z",
+  "title": "MC Optimization: Model Heuristic Calibration",
+  "targetThread": "Model Recommendation Tuning",
+  "problem": "Auto model picks currently skew toward gpt-5-nano for many practical delegation tasks.",
+  "fullPrompt": "Tune auto model suggestion heuristics and thresholds using representative project tasks. Recommend updated scoring so difficult debugging/integration work escalates appropriately.",
+  "doneCriteria": "Proposed threshold changes with sample inputs and expected model outputs.",
+  "reportBack": "Append summary with calibration plan, risks, and migration notes.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Moderate implementation scope with some reasoning depth.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

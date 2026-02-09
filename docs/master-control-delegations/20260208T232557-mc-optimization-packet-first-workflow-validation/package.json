@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T232557-mc-optimization-packet-first-workflow-validation",
+  "createdAt": "2026-02-08T23:25:57.247Z",
+  "title": "MC Optimization: Packet-First Workflow Validation",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Current workflow must guarantee that a paste into sub thread triggers immediate execution, not echo-only behavior.",
+  "fullPrompt": "Run a strict QA pass on Task Packet flow: package creation, TASK_PACKET.md generation, copy command behavior, and sub-thread start immediacy. Capture failures with exact repro and propose smallest fixes.",
+  "doneCriteria": "Verified pass/fail matrix for packet-first flow with reproducible evidence.",
+  "reportBack": "Append summary with blockers, severity, and recommended fix order.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

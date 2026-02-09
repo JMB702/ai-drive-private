@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T232557-mc-optimization-routing-trigger-and-thread-lifecycle-policy",
+  "createdAt": "2026-02-08T23:25:57.264Z",
+  "title": "MC Optimization: Routing Trigger and Thread Lifecycle Policy",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Main thread needs explicit, lightweight trigger control and deterministic handling for unknown/new thread targets.",
+  "fullPrompt": "Formalize routing rules around the MC trigger phrase, known-thread detection, and thread creation suggestion behavior. Propose policy text and enforcement checks.",
+  "doneCriteria": "Rule set draft covering trigger semantics, routing decisions, and thread creation policy.",
+  "reportBack": "Append summary with final rule proposal and implementation impacts.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

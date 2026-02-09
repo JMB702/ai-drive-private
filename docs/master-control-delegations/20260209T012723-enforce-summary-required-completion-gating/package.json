@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012723-enforce-summary-required-completion-gating",
+  "createdAt": "2026-02-09T01:27:23.105Z",
+  "title": "Enforce summary-required completion gating",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Completed delegated tasks are missing required Master Control summary entries, breaking visibility and PM decision quality.",
+  "fullPrompt": "Implement policy and tooling changes so delegated tasks cannot be considered complete without a summary entry in docs/master-control.md. Update fixed instructions, task packet template language, and any compliance checks so missing summaries are flagged as failed completion. Add explicit recovery workflow for backfilling summaries when missing.",
+  "doneCriteria": "1) Rules explicitly define completion = implementation + summary posted. 2) Missing summary is surfaced as non-compliant. 3) Recovery/backfill process is documented and actionable.",
+  "reportBack": "Append summary to docs/master-control.md with policy updates, files changed, and remaining edge cases.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

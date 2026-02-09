@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T005536-resolve-blank-starter-packet-in-live-ui",
+  "createdAt": "2026-02-09T00:55:36.661Z",
+  "title": "Resolve blank starter packet in live UI",
+  "targetThread": "Master Control UI",
+  "problem": "User still sees no copyable content in Project Manager Starter Packet field in the live UI.",
+  "fullPrompt": "Diagnose and fix why Project Manager Starter Packet appears blank in the browser UI even when backend endpoint may return startPacket. Include robust client-side loading and render guarantees: populate on initial load, repopulate on target repo path change, and never fail silently. If startPacket is missing/empty, show a prominent visible warning with remediation text. Keep copy interaction obvious and confirm success visibly when Copy Starter Packet is clicked.",
+  "doneCriteria": "1) Starter packet text is visible and copyable in live UI. 2) Copy click gives clear confirmation feedback. 3) Missing payload path shows prominent warning instead of blank field. 4) Add concise root-cause note in summary.",
+  "reportBack": "Append summary to docs/master-control.md with repro path, root cause, files changed, verification steps, and open items.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Moderate implementation scope with some reasoning depth.",
+  "suggestedEffort": "medium",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

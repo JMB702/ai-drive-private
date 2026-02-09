@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T004709-verify-starter-packet-ui-and-onboarding-flow",
+  "createdAt": "2026-02-09T00:47:09.840Z",
+  "title": "Verify starter packet UI and onboarding flow",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Need to verify that the Project Manager Starter Packet is prominently visible, copyable, and directs a new project thread to Master Control Ops first, then backend bootstrap setup.",
+  "fullPrompt": "Validate the Starter Packet UX and behavior end-to-end. Confirm the UI shows a prominent starter packet copy field/button, API returns startPacket, and packet content explicitly routes to Master Control Ops first and includes backend/setup bootstrap instructions. Report any regressions and propose fixes.",
+  "doneCriteria": "UI and API checks pass with exact expected text and copy flow; issues documented with concrete repro steps if any.",
+  "reportBack": "Append summary entry to docs/master-control.md with pass/fail and any follow-up fixes.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

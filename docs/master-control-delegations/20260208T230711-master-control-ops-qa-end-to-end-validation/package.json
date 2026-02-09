@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T230711-master-control-ops-qa-end-to-end-validation",
+  "createdAt": "2026-02-08T23:07:11.398Z",
+  "title": "Master Control Ops QA - End-to-End Validation",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Verify the standalone ops tool behaves reliably across create/edit/list/reload flows and summary return mechanics.",
+  "fullPrompt": "Run an end-to-end QA pass on Master Control Ops. Validate master prompt editing, master-control editing, package creation, package metadata edits, prompt regeneration, and copy-command behavior. Record concrete failures with repro steps and propose minimal fixes.",
+  "doneCriteria": "Documented pass/fail matrix with repro steps for failures and recommended fixes.",
+  "reportBack": "Append summary with key failures, affected files, and whether blocking issues remain.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

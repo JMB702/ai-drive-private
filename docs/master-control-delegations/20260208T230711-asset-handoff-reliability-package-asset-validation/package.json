@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T230711-asset-handoff-reliability-package-asset-validation",
+  "createdAt": "2026-02-08T23:07:11.410Z",
+  "title": "Asset Handoff Reliability - Package Asset Validation",
+  "targetThread": "Asset Handoff Reliability",
+  "problem": "Delegation packages must consistently preserve attached assets and keep paths usable by target threads.",
+  "fullPrompt": "Validate asset handoff behavior for delegation packages: create packages with attached files, verify asset paths are emitted in prompts, and confirm target-thread workflow can consume them without manual fixing.",
+  "doneCriteria": "Verified asset flow or exact failure points with reproduction steps.",
+  "reportBack": "Append summary with asset handoff reliability status and required fixes.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

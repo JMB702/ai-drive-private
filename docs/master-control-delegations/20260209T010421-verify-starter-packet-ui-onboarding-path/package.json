@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T010421-verify-starter-packet-ui-onboarding-path",
+  "createdAt": "2026-02-09T01:04:21.176Z",
+  "title": "Verify starter packet UI onboarding path",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Need independent verification that starter packet is visible/copyable and onboarding works from UI without workarounds.",
+  "fullPrompt": "Run end-to-end QA for starter packet flow in Master Control Ops. Validate initial page load shows non-empty starter packet, copy button yields clear confirmation feedback, and packet can be pasted into a new project thread to initiate setup instructions. Test target repo path change behavior and missing-payload behavior. Document exact pass/fail evidence.",
+  "doneCriteria": "QA checklist pass/fail with reproduction steps and evidence; summary appended.",
+  "reportBack": "Append summary in docs/master-control.md with verification result and remaining issues.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

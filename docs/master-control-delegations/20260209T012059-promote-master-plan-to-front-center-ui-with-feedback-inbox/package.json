@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012059-promote-master-plan-to-front-center-ui-with-feedback-inbox",
+  "createdAt": "2026-02-09T01:20:59.682Z",
+  "title": "Promote master plan to front-center UI with feedback inbox",
+  "targetThread": "Master Control UI",
+  "problem": "UI should be planning-first: master plan front and center, starter packet still visible but secondary, and unread feedback/proposal intake so PM does not manually prompt checks.",
+  "fullPrompt": "Redesign Master Control Ops layout to prioritize Master Plan at top-center (primary panel), keep Project Manager Starter Packet prominent but secondary, and add a Feedback/Proposals inbox panel with unread counts + filters (thread/status/date). Integrate with governance APIs for plan read/update and proposal intake/review where available; if API contract is pending, wire placeholder adapters with clear TODO boundaries. Ensure responsive layout and obvious PM workflow: review unread -> decide -> update plan.",
+  "doneCriteria": "Master Plan section is visually primary, Starter Packet remains easy to copy, feedback/proposal inbox is visible with unread indicator/filtering UI, and PM flow is intuitive on desktop/mobile.",
+  "reportBack": "Append summary to docs/master-control.md with UI changes, integration assumptions, and follow-ups for QA.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Moderate implementation scope with some reasoning depth.",
+  "suggestedEffort": "medium",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

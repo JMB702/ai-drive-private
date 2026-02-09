@@ -1,0 +1,36 @@
+[
+  {
+    "name": "missing-fetch-instruction",
+    "context": {
+      "packageId": "20260209T000000-example",
+      "masterControlPath": "/tmp/project/docs/master-control.md"
+    },
+    "packet": "# Task Packet\n\nTask: Example\n\nStart now. Do not stop at analysis.\n\nPackage: 20260209T000000-example\nOps URL: http://localhost:4210/?projectRoot=%2Ftmp%2Fproject\nPackage API: http://localhost:4210/api/delegation-packages/20260209T000000-example?projectRoot=%2Ftmp%2Fproject\n\nAction:\n1. Fetch `prompt` from http://localhost:4210/api/delegation-packages/20260209T000000-example?projectRoot=%2Ftmp%2Fproject (or open package 20260209T000000-example in Ops UI).\n2. Execute immediately.\n3. Append completion summary to /tmp/project/docs/master-control.md (standard fields).\n\nBegin implementation now.\n",
+    "expectedViolationIds": [
+      "missing-fetch-latest"
+    ]
+  },
+  {
+    "name": "target-thread-leak-in-packet",
+    "context": {
+      "packageId": "20260209T000001-example",
+      "masterControlPath": "/tmp/project/docs/master-control.md"
+    },
+    "packet": "# Task Packet\n\nTask: Example\n\nStart now. Do not stop at analysis.\nFetch the latest prompt from Master Control Ops and execute immediately.\n\nPackage: 20260209T000001-example\nTarget thread: Hidden Destination\nOps URL: http://localhost:4210/?projectRoot=%2Ftmp%2Fproject\nPackage API: http://localhost:4210/api/delegation-packages/20260209T000001-example?projectRoot=%2Ftmp%2Fproject\n\nAction:\n1. Fetch `prompt` from http://localhost:4210/api/delegation-packages/20260209T000001-example?projectRoot=%2Ftmp%2Fproject (or open package 20260209T000001-example in Ops UI).\n2. Execute immediately.\n3. Append completion summary to /tmp/project/docs/master-control.md (standard fields).\n\nBegin implementation now.\n",
+    "expectedViolationIds": [
+      "target-thread-leak"
+    ]
+  },
+  {
+    "name": "missing-project-root-scope",
+    "context": {
+      "packageId": "20260209T000002-example",
+      "masterControlPath": "/tmp/project/docs/master-control.md"
+    },
+    "packet": "# Task Packet\n\nTask: Example\n\nStart now. Do not stop at analysis.\nFetch the latest prompt from Master Control Ops and execute immediately.\n\nPackage: 20260209T000002-example\nOps URL: http://localhost:4210/\nPackage API: http://localhost:4210/api/delegation-packages/20260209T000002-example\n\nAction:\n1. Fetch `prompt` from http://localhost:4210/api/delegation-packages/20260209T000002-example (or open package 20260209T000002-example in Ops UI).\n2. Execute immediately.\n3. Append completion summary to /tmp/project/docs/master-control.md (standard fields).\n\nBegin implementation now.\n",
+    "expectedViolationIds": [
+      "missing-project-root-scope"
+    ]
+  }
+]
+

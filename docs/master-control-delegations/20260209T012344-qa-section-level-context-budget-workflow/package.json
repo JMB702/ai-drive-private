@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012344-qa-section-level-context-budget-workflow",
+  "createdAt": "2026-02-09T01:23:44.670Z",
+  "title": "QA section-level context budget workflow",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Need proof that PM can work from section summaries first and only expand relevant sections, preventing context overload.",
+  "fullPrompt": "Create and run QA scenarios for context-budget workflow: 1) PM opens plan index only, 2) PM filters unread proposals, 3) PM expands only relevant section(s), 4) PM acts without loading full plan. Verify starter packet remains copyable and visible. Capture pass/fail and any regressions.",
+  "doneCriteria": "QA evidence shows section-summary-first workflow works and reduces full-plan loading; issues logged with repro.",
+  "reportBack": "Append summary in docs/master-control.md with scenario results and residual risks.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

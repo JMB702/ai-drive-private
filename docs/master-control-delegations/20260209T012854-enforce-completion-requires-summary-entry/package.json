@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012854-enforce-completion-requires-summary-entry",
+  "createdAt": "2026-02-09T01:28:54.827Z",
+  "title": "Enforce completion requires summary entry",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Tasks appear completed without summary entries, breaking PM visibility and control.",
+  "fullPrompt": "Codify and enforce rule: delegated task is not complete until required summary is appended in docs/master-control.md. Update fixed instructions and packet/routing rules to mark missing summary as non-compliant completion. Add a concise backfill protocol for missing summaries and a checklist PM can run before considering a task done.",
+  "doneCriteria": "Rules updated, non-compliant state defined, backfill protocol documented, PM checklist added. Summary appended.",
+  "reportBack": "Append summary to docs/master-control.md with policy changes and enforcement checklist.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

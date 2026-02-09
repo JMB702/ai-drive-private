@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T234426-project-isolated-bootstrap-command-ux",
+  "createdAt": "2026-02-08T23:44:26.258Z",
+  "title": "Project-Isolated Bootstrap Command UX",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Need safe multi-project usage without cross-project data mixing, plus a prominent copyable command in the ops UI that initializes Master Control in new or existing projects.",
+  "fullPrompt": "Implement a packet-first onboarding flow for any repo: (1) strict per-project isolation so package/task data cannot mix across projects, (2) a prominent UI section with a copy button for a bootstrap command users can run in a target repo to initialize Master Control, and (3) an existing-project-safe bootstrap path. Ensure generated command is ready to paste and includes quoted paths for spaces.",
+  "doneCriteria": "User can copy one prominent command from UI, run it in another repo, and get isolated Master Control setup with no data bleed from current project.",
+  "reportBack": "Append summary with implementation details, UX location of command, and verification results for project isolation.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

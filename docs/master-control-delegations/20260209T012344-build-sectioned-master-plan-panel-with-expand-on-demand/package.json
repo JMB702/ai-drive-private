@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012344-build-sectioned-master-plan-panel-with-expand-on-demand",
+  "createdAt": "2026-02-09T01:23:44.670Z",
+  "title": "Build sectioned master plan panel with expand on demand",
+  "targetThread": "Master Control UI",
+  "problem": "Master plan must be front-and-center but should not force full-plan reads. UI needs section index view with explicit expand controls.",
+  "fullPrompt": "Implement planning-first UI that shows Master Plan section index (titles + short summaries + status) as primary panel, with explicit expand/collapse to load section details only when needed. Keep Starter Packet visible but secondary. Add unread feedback/proposal indicator and filters so PM can select relevant sections before reading details.",
+  "doneCriteria": "Default UI shows section summaries only; detail loads on explicit expand; starter packet remains accessible; unread/filter UI visible and usable.",
+  "reportBack": "Append summary in docs/master-control.md with UI behavior, files changed, and integration assumptions.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

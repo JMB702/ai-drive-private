@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T230739-known-thread-verification-package",
+  "createdAt": "2026-02-08T23:07:39.778Z",
+  "title": "Known thread verification package",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Post-thread-map verification.",
+  "fullPrompt": "Verify known-thread handling remains non-blocking.",
+  "doneCriteria": "threadSuggestion.shouldCreate must be false",
+  "reportBack": "Append concise result summary.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

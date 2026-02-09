@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T000627-mc-model-clarity-check",
+  "createdAt": "2026-02-09T00:06:27.968Z",
+  "title": "mc-model-clarity-check",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "",
+  "fullPrompt": "check",
+  "doneCriteria": "",
+  "reportBack": "",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

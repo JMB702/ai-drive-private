@@ -44,6 +44,7 @@ Auth (dev): pass `x-user-id` header.
 
 - `GET /billing/:workspaceId/balance`
 - `GET /billing/:workspaceId/usage`
+- `GET /billing/:workspaceId/media-spend` (estimated USD from finalized credits)
 - `POST /billing/top-up`
 - `POST /billing/overage`
 

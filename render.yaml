@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: ai-drive-private
+    runtime: docker
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    autoDeployTrigger: off
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: WEB_PORT
+        value: "10000"
+      - key: API_PORT
+        value: "4100"
+      - key: AIDRIVE_DATA_DIR
+        value: /data
+      - key: AIDRIVE_DISABLE_PERSISTENCE
+        value: "0"
+      - key: API_BODY_LIMIT_MB
+        value: "8"
+      - key: APP_ACCESS_USERNAME
+        sync: false
+      - key: APP_ACCESS_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: KLING_API_KEY
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+      - key: A2E_API_KEY
+        sync: false
+      - key: NANO_BANANA_API_KEY
+        sync: false
+    disk:
+      name: aidrive-data
+      mountPath: /data
+      sizeGB: 20
+

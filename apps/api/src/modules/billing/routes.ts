@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { nowIso } from "../../lib/time.js";
 import { requireWorkspaceMember } from "../../lib/auth.js";
+import { loadEnv } from "../../config/env.js";
 
 const topupSchema = z.object({
   workspaceId: z.string(),
@@ -15,7 +16,21 @@ const overageSchema = z.object({
   description: z.string().min(2)
 });
 
+function finalizedTransactionAmount(amount: number): number {
+  if (!Number.isFinite(amount)) return 0;
+  const normalized = Math.trunc(amount);
+  return normalized > 0 ? normalized : 0;
+}
+
+function toUsdCents(credits: number, usdCentsPerCredit: number): number {
+  if (!Number.isFinite(credits) || !Number.isFinite(usdCentsPerCredit)) return 0;
+  return Math.max(0, Math.trunc(credits) * Math.trunc(usdCentsPerCredit));
+}
+
 export async function registerBillingRoutes(app: FastifyInstance): Promise<void> {
+  const env = loadEnv();
+  const usdCentsPerCredit = Math.max(1, env.AIDRIVE_CREDIT_USD_CENTS);
+
   app.get("/v1/billing/:workspaceId/balance", async (request) => {
     const { workspaceId } = request.params as { workspaceId: string };
     requireWorkspaceMember(request, workspaceId);
@@ -30,6 +45,62 @@ export async function registerBillingRoutes(app: FastifyInstance): Promise<void>
     requireWorkspaceMember(request, workspaceId);
     return {
       transactions: app.ctx.store.creditTransactions.filter((t) => t.workspaceId === workspaceId)
+    };
+  });
+
+  app.get("/v1/billing/:workspaceId/media-spend", async (request) => {
+    const { workspaceId } = request.params as { workspaceId: string };
+    requireWorkspaceMember(request, workspaceId);
+
+    const jobTypeById = new Map(
+      app.ctx.store.generationJobs
+        .filter((job) => job.workspaceId === workspaceId)
+        .map((job) => [job.id, job.request.type] as const)
+    );
+
+    let image = 0;
+    let video = 0;
+    let imageTransactions = 0;
+    let videoTransactions = 0;
+
+    for (const tx of app.ctx.store.creditTransactions) {
+      if (tx.workspaceId !== workspaceId) continue;
+      if (tx.type !== "FINALIZE") continue;
+      const amount = finalizedTransactionAmount(tx.amount);
+      if (amount <= 0) continue;
+
+      const jobType = tx.jobId ? jobTypeById.get(tx.jobId) : undefined;
+      if (jobType === "IMAGE") {
+        image += amount;
+        imageTransactions += 1;
+        continue;
+      }
+      if (jobType === "VIDEO") {
+        video += amount;
+        videoTransactions += 1;
+      }
+    }
+
+    return {
+      workspaceId,
+      currency: "USD",
+      estimated: true,
+      pricing: {
+        usdCentsPerCredit
+      },
+      totals: {
+        imageCredits: image,
+        videoCredits: video,
+        totalCredits: image + video,
+        imageUsdCents: toUsdCents(image, usdCentsPerCredit),
+        videoUsdCents: toUsdCents(video, usdCentsPerCredit),
+        totalUsdCents: toUsdCents(image + video, usdCentsPerCredit)
+      },
+      counts: {
+        imageTransactions,
+        videoTransactions
+      },
+      updatedAt: nowIso()
     };
   });
 

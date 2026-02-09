@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T005249-fix-starter-packet-visibility-and-copy-confirmation-feedback",
+  "createdAt": "2026-02-09T00:52:49.799Z",
+  "title": "Fix starter packet visibility and copy confirmation feedback",
+  "targetThread": "Master Control UI",
+  "problem": "User cannot see starter packet text in the UI and copy action lacks clear confirmation feedback. This blocks new-project onboarding flow.",
+  "fullPrompt": "Investigate and fix Master Control Ops UI so the Project Manager Starter Packet field reliably shows non-empty content after load and target path changes. Add explicit user-visible copy confirmation feedback when 'Copy Starter Packet' is clicked (persistent enough to notice and not easily missed). Ensure fallback warning appears if starter packet payload is empty, with remediation text.",
+  "doneCriteria": "1) Starter packet text reliably visible when API has startPacket. 2) Copy Starter Packet gives clear confirmation feedback. 3) Empty payload path shows visible warning and remediation. 4) No regression to bootstrap command copy.",
+  "reportBack": "Append summary to docs/master-control.md with root cause, fix, files changed, and remaining risks.",
+  "suggestedModel": "gpt-5",
+  "modelReason": "High complexity or cross-cutting work. Use the strongest reasoning model.",
+  "suggestedEffort": "high",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

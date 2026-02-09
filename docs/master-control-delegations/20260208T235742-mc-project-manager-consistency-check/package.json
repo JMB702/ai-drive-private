@@ -1,0 +1,16 @@
+{
+  "packageId": "20260208T235742-mc-project-manager-consistency-check",
+  "createdAt": "2026-02-08T23:57:42.464Z",
+  "title": "mc-project-manager-consistency-check",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "",
+  "fullPrompt": "check compact packet",
+  "doneCriteria": "",
+  "reportBack": "",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

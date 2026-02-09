@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T234106-mc-tool-link-packet-check",
+  "createdAt": "2026-02-08T23:41:06.178Z",
+  "title": "mc-tool-link-packet-check-updated",
+  "targetThread": "Master Control Ops QA",
+  "problem": "",
+  "fullPrompt": "verify tool-linked packet",
+  "doneCriteria": "",
+  "reportBack": "",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

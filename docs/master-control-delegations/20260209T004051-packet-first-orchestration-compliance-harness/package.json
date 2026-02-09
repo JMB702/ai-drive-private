@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T004051-packet-first-orchestration-compliance-harness",
+  "createdAt": "2026-02-09T00:40:51.543Z",
+  "title": "Packet-first orchestration compliance harness",
+  "targetThread": "Orchestration Compliance Harness",
+  "problem": "Need deterministic packet-first orchestration compliance checks and replayable failure harness for handoff workflow.",
+  "fullPrompt": "Build a focused compliance harness that checks whether packet-first orchestration output is emitted for focused requests and documents replay cases. Keep scope isolated to harness + policy checks.",
+  "doneCriteria": "Harness and policy checks are reproducible with clear pass/fail output.",
+  "reportBack": "Append a concise completion summary entry.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

@@ -5,12 +5,15 @@ import path from "path";
 const schema = z.object({
   PORT: z.coerce.number().default(4000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  API_BODY_LIMIT_MB: z.coerce.number().int().positive().default(8),
+  AIDRIVE_CREDIT_USD_CENTS: z.coerce.number().int().positive().default(1),
   GEMINI_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   KLING_API_KEY: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
   A2E_API_KEY: z.string().optional(),
-  NANO_BANANA_API_KEY: z.string().optional()
+  NANO_BANANA_API_KEY: z.string().optional(),
+  AIDRIVE_DATA_DIR: z.string().optional()
 });
 
 export type Env = z.infer<typeof schema>;

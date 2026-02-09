@@ -1,0 +1,28 @@
+services:
+  aidrive:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: aidrive
+    restart: unless-stopped
+    env_file:
+      - ./.env.production
+    environment:
+      NODE_ENV: production
+      WEB_PORT: 3000
+      API_PORT: 4100
+      AIDRIVE_DATA_DIR: /data
+    ports:
+      - "3000:3000"
+    volumes:
+      - aidrive_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  aidrive_data:
+

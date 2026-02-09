@@ -1,0 +1,16 @@
+{
+  "packageId": "20260208T235254-mc-compact-packet-and-operator-instructions-check",
+  "createdAt": "2026-02-08T23:52:54.264Z",
+  "title": "mc-compact-packet-and-operator-instructions-check",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "",
+  "fullPrompt": "validate compact packet + operator instructions",
+  "doneCriteria": "",
+  "reportBack": "",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

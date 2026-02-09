@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T230711-model-recommendation-tuning-heuristic-calibration",
+  "createdAt": "2026-02-08T23:07:11.408Z",
+  "title": "Model Recommendation Tuning - Heuristic Calibration",
+  "targetThread": "Model Recommendation Tuning",
+  "problem": "Current auto model selection may be too conservative or aggressive for real project tasks.",
+  "fullPrompt": "Evaluate current model auto-selection heuristics against representative tasks. Propose threshold and signal adjustments so thread model suggestions better match expected difficulty and risk.",
+  "doneCriteria": "Concrete heuristic changes with before/after examples of model picks.",
+  "reportBack": "Append summary with calibration recommendations and any regression risks.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

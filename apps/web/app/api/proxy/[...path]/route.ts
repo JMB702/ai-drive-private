@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
+import fs from "fs";
+import path from "path";
 
 export const runtime = "nodejs";
 
@@ -63,12 +65,16 @@ type LocalVersion = {
 const localStore: {
   seeded: boolean;
   folders: LocalFolder[];
+  folderLayouts: Record<string, string[]>;
+  workspaceFolderOrder: Record<string, string[]>;
   assets: LocalAsset[];
   jobs: LocalJob[];
   versions: LocalVersion[];
 } = {
   seeded: false,
   folders: [],
+  folderLayouts: {},
+  workspaceFolderOrder: {},
   assets: [],
   jobs: [],
   versions: []
@@ -76,6 +82,39 @@ const localStore: {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function folderNamePrefix(folderId: string): string {
+  const folder = localStore.folders.find((item) => item.id === folderId);
+  const raw = (folder?.name ?? "image")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return raw.length > 0 ? raw : "image";
+}
+
+function nextFolderAssetName(folderId: string, extension: string): string {
+  const prefix = folderNamePrefix(folderId);
+  const pattern = new RegExp(`^${escapeRegex(prefix)}-(\\d+)(?:\\.[A-Za-z0-9]+)?$`, "i");
+  let max = 0;
+  for (const asset of localStore.assets) {
+    if (asset.folderId !== folderId) continue;
+    const base = asset.name.replace(/\.[A-Za-z0-9]+$/, "");
+    const match = base.match(pattern);
+    if (!match) continue;
+    const seq = Number.parseInt(match[1], 10);
+    if (Number.isFinite(seq) && seq > max) {
+      max = seq;
+    }
+  }
+  const next = String(max + 1).padStart(4, "0");
+  return `${prefix}-${next}.${extension}`;
 }
 
 function ensureSeeded(): void {
@@ -105,15 +144,203 @@ function aspectToSize(aspectRatio: string, resolution: string): { width: number;
   return { width: Math.max(256, Math.round((base * w) / h)), height: base };
 }
 
+function parseAspectRatio(aspectRatio: string): number {
+  const match = aspectRatio.match(/^(\d+):(\d+)$/);
+  if (!match) return 1;
+  const w = Number(match[1]);
+  const h = Number(match[2]);
+  if (!w || !h) return 1;
+  return w / h;
+}
+
+function detectWebpRatio(bytes: Buffer): number | null {
+  if (bytes.length < 30) return null;
+  if (bytes.toString("ascii", 0, 4) !== "RIFF") return null;
+  if (bytes.toString("ascii", 8, 12) !== "WEBP") return null;
+
+  function readVp8X(offset: number): number | null {
+    if (offset + 18 > bytes.length) return null;
+    const width = 1 + bytes.readUIntLE(offset + 12, 3);
+    const height = 1 + bytes.readUIntLE(offset + 15, 3);
+    if (!width || !height) return null;
+    return width / height;
+  }
+
+  function readVp8L(offset: number): number | null {
+    if (offset + 13 > bytes.length) return null;
+    if (bytes[offset + 8] !== 0x2f) return null;
+    const b0 = bytes[offset + 9];
+    const b1 = bytes[offset + 10];
+    const b2 = bytes[offset + 11];
+    const b3 = bytes[offset + 12];
+    const width = 1 + (((b1 & 0x3f) << 8) | b0);
+    const height = 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6));
+    if (!width || !height) return null;
+    return width / height;
+  }
+
+  function readVp8(offset: number): number | null {
+    if (offset + 30 > bytes.length) return null;
+    const width = bytes.readUInt16LE(offset + 26) & 0x3fff;
+    const height = bytes.readUInt16LE(offset + 28) & 0x3fff;
+    if (!width || !height) return null;
+    return width / height;
+  }
+
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const chunkType = bytes.toString("ascii", offset, offset + 4);
+    const chunkSize = bytes.readUInt32LE(offset + 4);
+    if (chunkType === "VP8X") return readVp8X(offset);
+    if (chunkType === "VP8L") return readVp8L(offset);
+    if (chunkType === "VP8 ") return readVp8(offset);
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+
+  return null;
+}
+
+function detectDataUrlRatio(dataUrl: string): number | null {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  const mimeType = match[1].toLowerCase();
+  const bytes = Buffer.from(match[2], "base64");
+
+  if (mimeType.includes("png")) {
+    if (bytes.length < 24) return null;
+    if (bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") return null;
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    if (!width || !height) return null;
+    return width / height;
+  }
+
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = bytes[offset + 1];
+      const length = bytes.readUInt16BE(offset + 2);
+      if (length < 2 || offset + 2 + length > bytes.length) break;
+      const isSof =
+        marker === 0xc0 || marker === 0xc1 || marker === 0xc2 || marker === 0xc3 ||
+        marker === 0xc5 || marker === 0xc6 || marker === 0xc7 || marker === 0xc9 ||
+        marker === 0xca || marker === 0xcb || marker === 0xcd || marker === 0xce || marker === 0xcf;
+      if (isSof) {
+        const height = bytes.readUInt16BE(offset + 5);
+        const width = bytes.readUInt16BE(offset + 7);
+        if (!width || !height) return null;
+        return width / height;
+      }
+      offset += 2 + length;
+    }
+  }
+
+  if (mimeType.includes("webp")) {
+    return detectWebpRatio(bytes);
+  }
+
+  return null;
+}
+
+function isAspectRatioSatisfied(aspectRatio: string, dataUrl: string): boolean {
+  const requested = parseAspectRatio(aspectRatio);
+  const actual = detectDataUrlRatio(dataUrl);
+  if (!actual) return false;
+  return Math.abs(actual - requested) <= 0.03;
+}
+
+function createFailurePreviewDataUrl(aspectRatio: string, message: string): string {
+  const { width, height } = aspectToSize(aspectRatio, "1K");
+  const detail = message.replace(/\s+/g, " ").trim().slice(0, 80).replace(/[<>&"]/g, "");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#2b1d33"/><stop offset="100%" stop-color="#1b2234"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#bg)"/><rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.14)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.72)}" rx="${Math.max(18, Math.round(Math.min(width, height) * 0.04))}" fill="rgba(9,11,20,0.6)" stroke="rgba(255,142,170,0.44)" stroke-width="2"/><text x="50%" y="47%" text-anchor="middle" fill="#ffe6ee" font-family="Arial, sans-serif" font-size="${Math.max(28, Math.round(Math.min(width, height) * 0.065))}" font-weight="700">Failed</text><text x="50%" y="60%" text-anchor="middle" fill="#e8d7e4" font-family="Arial, sans-serif" font-size="${Math.max(15, Math.round(Math.min(width, height) * 0.032))}">${detail || "Generation failed"}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function estimateLocalReservedCredits(job: LocalJob): number {
+  const base = job.request.type === "VIDEO" ? 20 : 4;
+  const qualityMultiplier = typeof job.request.settings.quality === "number" ? Number(job.request.settings.quality) : 1;
+  return Math.max(1, Math.ceil(base * qualityMultiplier));
+}
+
+function localFinalizedJobSpend(job: LocalJob): number {
+  if (job.status !== "SUCCEEDED") return 0;
+  const reserved = estimateLocalReservedCredits(job);
+  return Math.max(1, Math.floor(reserved * 0.9));
+}
+
+function localUsdCentsPerCredit(): number {
+  const raw = Number(process.env.AIDRIVE_CREDIT_USD_CENTS ?? 1);
+  if (!Number.isFinite(raw) || raw <= 0) return 1;
+  return Math.trunc(raw);
+}
+
+function toUsdCents(credits: number, usdCentsPerCredit: number): number {
+  if (!Number.isFinite(credits) || !Number.isFinite(usdCentsPerCredit)) return 0;
+  return Math.max(0, Math.trunc(credits) * Math.trunc(usdCentsPerCredit));
+}
+
+function createLocalFailedAsset(params: {
+  workspaceId: string;
+  folderId: string;
+  model: string;
+  prompt: string;
+  aspectRatio: string;
+  resolution: string;
+  jobId: string;
+  error: string;
+}): void {
+  const assetId = randomUUID();
+  const previewUrl = createFailurePreviewDataUrl(params.aspectRatio, params.error);
+  localStore.assets.unshift({
+    id: assetId,
+    workspaceId: params.workspaceId,
+    folderId: params.folderId,
+    name: nextFolderAssetName(params.folderId, "png"),
+    mimeType: "image/png",
+    tags: ["generated", "failed", params.model, `job:${params.jobId}`],
+    deletedAt: null,
+    createdBy: "user_demo",
+    createdAt: nowIso(),
+    previewUrl,
+    aspectRatio: params.aspectRatio,
+    resolution: params.resolution
+  });
+  localStore.folderLayouts[params.folderId] = [
+    assetId,
+    ...(localStore.folderLayouts[params.folderId] ?? []).filter((id) => id !== assetId)
+  ];
+  localStore.versions.unshift({
+    id: randomUUID(),
+    assetId,
+    version: 1,
+    source: "GENERATE",
+    storageKey: `failed/local/${assetId}.png`,
+    checksum: randomUUID().replaceAll("-", ""),
+    metadata: {
+      prompt: params.prompt,
+      model: params.model,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution,
+      quality: params.resolution,
+      failed: true,
+      generationJobId: params.jobId,
+      failureMessage: params.error,
+      previewDataUrl: previewUrl
+    },
+    createdBy: "user_demo",
+    createdAt: nowIso()
+  });
+}
+
 function imageModelForPrompt(model: string): string {
   const key = model.toLowerCase();
   if (key.includes("nano banana")) return "gemini-2.5-flash-image";
   return "gemini-2.0-flash-preview-image-generation";
-}
-
-function requiresGemini(model: string): boolean {
-  const m = model.toLowerCase();
-  return m.includes("gemini") || m.includes("nano banana") || m.includes("a2e");
 }
 
 async function tryGeminiDataUrl(prompt: string, model: string, aspectRatio: string): Promise<string | null> {
@@ -164,6 +391,75 @@ function parseJsonBody(body: ArrayBuffer | undefined): any {
   }
 }
 
+function decodeInlineImageDataUrl(dataUrl: string): { contentType: string; bytes: Buffer } | null {
+  if (dataUrl.startsWith("data:image/svg+xml;utf8,")) {
+    const encoded = dataUrl.slice("data:image/svg+xml;utf8,".length);
+    try {
+      return {
+        contentType: "image/svg+xml",
+        bytes: Buffer.from(decodeURIComponent(encoded), "utf8")
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  try {
+    const bytes = Buffer.from(match[2], "base64");
+    if (bytes.length === 0) return null;
+    return {
+      contentType: match[1].toLowerCase(),
+      bytes
+    };
+  } catch {
+    return null;
+  }
+}
+
+function previewBlobFromStorageKey(storageKey: string): string | null {
+  const match = storageKey.match(/^previews\/([a-f0-9]{40}\.[a-z0-9]+)$/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function readLocalPreviewBlob(blobKey: string): { contentType: string; bytes: Buffer } | null {
+  if (!/^[a-f0-9]{40}\.[a-z0-9]+$/i.test(blobKey)) return null;
+  const extension = blobKey.split(".").pop()?.toLowerCase() ?? "";
+  const contentType = extension === "png"
+    ? "image/png"
+    : extension === "jpg" || extension === "jpeg"
+      ? "image/jpeg"
+      : extension === "webp"
+        ? "image/webp"
+        : extension === "avif"
+          ? "image/avif"
+          : extension === "gif"
+            ? "image/gif"
+            : extension === "svg"
+              ? "image/svg+xml"
+              : "application/octet-stream";
+  const candidates = [
+    path.join(process.cwd(), "apps", "api", ".data", "previews", blobKey),
+    path.join(process.cwd(), ".data", "previews", blobKey)
+  ];
+  for (const filePath of candidates) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const bytes = fs.readFileSync(filePath);
+      if (bytes.length === 0) continue;
+      return { contentType, bytes };
+    } catch {
+      // Continue to next candidate.
+    }
+  }
+  return null;
+}
+
+function toArrayBuffer(bytes: Buffer): ArrayBuffer {
+  return Uint8Array.from(bytes).buffer;
+}
+
 function localFallback(
   method: string,
   path: string[],
@@ -175,8 +471,25 @@ function localFallback(
 
   if (method === "GET" && path[0] === "v1" && path[1] === "drive" && path[2] === "folders" && path[3]) {
     const workspaceId = path[3];
+    const activeFolders = localStore.folders.filter((folder) => folder.workspaceId === workspaceId && !folder.deletedAt);
+    const folderById = new Map(activeFolders.map((folder) => [folder.id, folder] as const));
+    const currentOrder = localStore.workspaceFolderOrder[workspaceId] ?? [];
+    const normalizedOrder = [
+      ...currentOrder.filter((folderId) => folderById.has(folderId)),
+      ...activeFolders.map((folder) => folder.id).filter((folderId) => !currentOrder.includes(folderId))
+    ];
+    localStore.workspaceFolderOrder[workspaceId] = normalizedOrder;
     return NextResponse.json({
-      folders: localStore.folders.filter((f) => f.workspaceId === workspaceId && !f.deletedAt)
+      folders: normalizedOrder
+        .map((folderId) => folderById.get(folderId))
+        .filter((folder): folder is NonNullable<typeof folder> => Boolean(folder))
+        .map((folder) => ({
+          ...folder,
+          layout: {
+            customOrderAssetIds: localStore.folderLayouts[folder.id] ?? []
+          }
+        })),
+      folderOrderIds: normalizedOrder
     });
   }
 
@@ -191,7 +504,95 @@ function localFallback(
       createdAt: nowIso()
     };
     localStore.folders.push(folder);
+    const currentOrder = localStore.workspaceFolderOrder[folder.workspaceId] ?? [];
+    localStore.workspaceFolderOrder[folder.workspaceId] = [
+      ...currentOrder.filter((id) => id !== folder.id),
+      folder.id
+    ];
     return NextResponse.json({ folder }, { status: 201 });
+  }
+
+  if (method === "PATCH" && path[0] === "v1" && path[1] === "drive" && path[2] === "folders" && path[3] && path[4] === "order") {
+    const workspaceId = path[3];
+    const bodyWithOrder = json && typeof json === "object"
+      ? (json as { folderOrderIds?: unknown[] })
+      : {};
+    const requestedOrder = Array.isArray(bodyWithOrder.folderOrderIds)
+      ? bodyWithOrder.folderOrderIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const activeFolderIds = localStore.folders
+      .filter((folder) => folder.workspaceId === workspaceId && !folder.deletedAt)
+      .map((folder) => folder.id);
+    const validSet = new Set(activeFolderIds);
+    const deduped: string[] = Array.from(new Set(requestedOrder.filter((folderId) => validSet.has(folderId))));
+    const normalizedOrder = [...deduped, ...activeFolderIds.filter((folderId) => !deduped.includes(folderId))];
+    localStore.workspaceFolderOrder[workspaceId] = normalizedOrder;
+    return NextResponse.json({ workspaceId, folderOrderIds: normalizedOrder });
+  }
+
+  if (method === "DELETE" && path[0] === "v1" && path[1] === "drive" && path[2] === "folders" && path[3]) {
+    const folderId = path[3];
+    const folder = localStore.folders.find((item) => item.id === folderId && !item.deletedAt);
+    if (!folder) {
+      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    }
+
+    const deletedAt = nowIso();
+    folder.deletedAt = deletedAt;
+    delete localStore.folderLayouts[folderId];
+    const currentOrder = localStore.workspaceFolderOrder[folder.workspaceId] ?? [];
+    localStore.workspaceFolderOrder[folder.workspaceId] = currentOrder.filter((id) => id !== folderId);
+
+    let deletedAssetCount = 0;
+    for (const asset of localStore.assets) {
+      if (asset.folderId !== folderId || asset.deletedAt) continue;
+      asset.deletedAt = deletedAt;
+      deletedAssetCount += 1;
+    }
+
+    return NextResponse.json({ deleted: true, folderId, deletedAssetCount });
+  }
+
+  if (method === "GET" && path[0] === "v1" && path[1] === "drive" && path[2] === "assets" && path[3] && path[4] === "file") {
+    const assetId = path[3];
+    const asset = localStore.assets.find((item) => item.id === assetId && !item.deletedAt);
+    if (!asset) {
+      return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+    const versions = localStore.versions
+      .filter((item) => item.assetId === assetId)
+      .sort((a, b) => b.version - a.version);
+    const latest = versions[0];
+    if (!latest) {
+      return NextResponse.json({ error: "Asset version not found" }, { status: 404 });
+    }
+    const previewBlob = typeof latest.metadata?.previewBlob === "string"
+      ? latest.metadata.previewBlob
+      : previewBlobFromStorageKey(latest.storageKey);
+    if (previewBlob) {
+      const blob = readLocalPreviewBlob(previewBlob);
+      if (blob) {
+        return new NextResponse(toArrayBuffer(blob.bytes), {
+          status: 200,
+          headers: {
+            "content-type": blob.contentType,
+            "cache-control": "public, max-age=600"
+          }
+        });
+      }
+    }
+    const previewDataUrl = typeof latest.metadata?.previewDataUrl === "string" ? latest.metadata.previewDataUrl : "";
+    const decoded = decodeInlineImageDataUrl(previewDataUrl);
+    if (!decoded) {
+      return NextResponse.json({ error: "Asset file not available" }, { status: 404 });
+    }
+    return new NextResponse(toArrayBuffer(decoded.bytes), {
+      status: 200,
+      headers: {
+        "content-type": decoded.contentType,
+        "cache-control": "public, max-age=600"
+      }
+    });
   }
 
   if (method === "GET" && path[0] === "v1" && path[1] === "drive" && path[2] === "assets" && path[3]) {
@@ -208,6 +609,52 @@ function localFallback(
     return NextResponse.json({ assets, previews, aspectRatios, resolutions });
   }
 
+  if (method === "GET" && path[0] === "v1" && path[1] === "billing" && path[2] && path[3] === "media-spend") {
+    const workspaceId = path[2];
+    const usdCentsPerCredit = localUsdCentsPerCredit();
+    let image = 0;
+    let video = 0;
+    let imageTransactions = 0;
+    let videoTransactions = 0;
+
+    for (const job of localStore.jobs) {
+      if (job.workspaceId !== workspaceId) continue;
+      const amount = localFinalizedJobSpend(job);
+      if (amount <= 0) continue;
+      if (job.request.type === "IMAGE") {
+        image += amount;
+        imageTransactions += 1;
+        continue;
+      }
+      if (job.request.type === "VIDEO") {
+        video += amount;
+        videoTransactions += 1;
+      }
+    }
+
+    return NextResponse.json({
+      workspaceId,
+      currency: "USD",
+      estimated: true,
+      pricing: {
+        usdCentsPerCredit
+      },
+      totals: {
+        imageCredits: image,
+        videoCredits: video,
+        totalCredits: image + video,
+        imageUsdCents: toUsdCents(image, usdCentsPerCredit),
+        videoUsdCents: toUsdCents(video, usdCentsPerCredit),
+        totalUsdCents: toUsdCents(image + video, usdCentsPerCredit)
+      },
+      counts: {
+        imageTransactions,
+        videoTransactions
+      },
+      updatedAt: nowIso()
+    });
+  }
+
   if (method === "GET" && path[0] === "v1" && path[1] === "generation" && path[2] === "jobs" && path[3]) {
     const workspaceId = path[3];
     return NextResponse.json({ jobs: localStore.jobs.filter((j) => j.workspaceId === workspaceId) });
@@ -222,13 +669,6 @@ function localFallback(
     const settings = (json.settings ?? {}) as Record<string, string | number | boolean>;
     const aspectRatio = typeof settings.aspectRatio === "string" ? settings.aspectRatio : "1:1";
     const resolution = typeof settings.resolution === "string" ? settings.resolution : "1K";
-    if (type === "IMAGE" && requiresGemini(model) && !process.env.GEMINI_API_KEY) {
-      return NextResponse.json(
-        { error: "Missing GEMINI_API_KEY for image generation in fallback mode" },
-        { status: 400 }
-      );
-    }
-
     const job: LocalJob = {
       id: randomUUID(),
       workspaceId,
@@ -248,20 +688,58 @@ function localFallback(
           job.updatedAt = nowIso();
           if (folderId && type === "IMAGE") {
             const assetId = randomUUID();
-            const previewUrl = await tryGeminiDataUrl(prompt, model, aspectRatio);
+            const needsStrictRatio = aspectRatio !== "1:1";
+            let previewUrl: string | null = null;
+            for (let attempt = 0; attempt < (needsStrictRatio ? 3 : 1); attempt += 1) {
+              const geminiCandidate = await tryGeminiDataUrl(prompt, model, aspectRatio);
+              if (!geminiCandidate) continue;
+              if (!needsStrictRatio || isAspectRatioSatisfied(aspectRatio, geminiCandidate)) {
+                previewUrl = geminiCandidate;
+                break;
+              }
+              if (!previewUrl) {
+                previewUrl = geminiCandidate;
+              }
+            }
             if (!previewUrl) {
               job.status = "FAILED";
               job.error = "Gemini image generation failed";
               job.updatedAt = nowIso();
+              createLocalFailedAsset({
+                workspaceId,
+                folderId,
+                model,
+                prompt,
+                aspectRatio,
+                resolution,
+                jobId: job.id,
+                error: job.error
+              });
+              return;
+            }
+            if (needsStrictRatio && !isAspectRatioSatisfied(aspectRatio, previewUrl)) {
+              job.status = "FAILED";
+              job.error = `Could not produce requested aspect ratio (${aspectRatio})`;
+              job.updatedAt = nowIso();
+              createLocalFailedAsset({
+                workspaceId,
+                folderId,
+                model,
+                prompt,
+                aspectRatio,
+                resolution,
+                jobId: job.id,
+                error: job.error
+              });
               return;
             }
             localStore.assets.unshift({
               id: assetId,
               workspaceId,
               folderId,
-              name: `generated-${Date.now()}.png`,
+              name: nextFolderAssetName(folderId, "png"),
               mimeType: "image/png",
-              tags: ["generated", model],
+              tags: ["generated", model, `job:${job.id}`],
               deletedAt: null,
               createdBy: "user_demo",
               createdAt: nowIso(),
@@ -269,6 +747,10 @@ function localFallback(
               aspectRatio,
               resolution
             });
+            localStore.folderLayouts[folderId] = [
+              assetId,
+              ...(localStore.folderLayouts[folderId] ?? []).filter((id) => id !== assetId)
+            ];
             localStore.versions.unshift({
               id: randomUUID(),
               assetId,
@@ -333,6 +815,7 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
   const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
 
   let lastError: unknown = null;
+  let lastServerFailure: { status: number; headers: Headers; body: ArrayBuffer } | null = null;
 
   for (const base of targetBaseUrls()) {
     try {
@@ -348,13 +831,26 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
       responseHeaders.delete("content-length");
       responseHeaders.delete("transfer-encoding");
 
-      return new NextResponse(upstream.body, {
+      const responseBody = await upstream.arrayBuffer();
+      if (upstream.status >= 500) {
+        lastServerFailure = { status: upstream.status, headers: responseHeaders, body: responseBody };
+        continue;
+      }
+
+      return new NextResponse(responseBody, {
         status: upstream.status,
         headers: responseHeaders
       });
     } catch (error) {
       lastError = error;
     }
+  }
+
+  if (lastServerFailure) {
+    return new NextResponse(lastServerFailure.body, {
+      status: lastServerFailure.status,
+      headers: lastServerFailure.headers
+    });
   }
 
   const fallback = localFallback(method, path, body);

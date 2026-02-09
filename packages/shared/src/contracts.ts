@@ -97,6 +97,31 @@ export interface EffectivePermission {
 export type GenerationType = "IMAGE" | "VIDEO";
 export type JobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 
+export type GenerationFailureCategory =
+  | "SAFETY_BLOCK"
+  | "CONTENT_POLICY"
+  | "API_INVALID_ARGUMENT"
+  | "API_AUTH"
+  | "API_RATE_LIMIT"
+  | "API_UNAVAILABLE"
+  | "API_TIMEOUT"
+  | "ASPECT_RATIO_UNSUPPORTED"
+  | "ASPECT_RATIO_MISMATCH"
+  | "NETWORK"
+  | "UNKNOWN";
+
+export interface GenerationFailure {
+  category: GenerationFailureCategory;
+  provider: string;
+  statusCode: number | null;
+  errorCode: string | null;
+  userMessage: string;
+  suggestedFix: string;
+  retryable: boolean;
+  rawMessage: string;
+  debugContext: Record<string, string | number | boolean | null>;
+}
+
 export interface GenerationRequest {
   workspaceId: string;
   assetId?: string;
@@ -125,6 +150,7 @@ export interface GenerationJob {
   request: GenerationRequest;
   result: GenerationResult | null;
   error: string | null;
+  failure?: GenerationFailure | null;
   reservedCredits: number;
   createdAt: string;
   updatedAt: string;

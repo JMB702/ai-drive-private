@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T004915-enforce-mc-reminder-delegation-behavior",
+  "createdAt": "2026-02-09T00:49:15.392Z",
+  "title": "Enforce mc reminder delegation behavior",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Project manager handled tasks directly despite mc reminder intent. Need explicit enforcement and visible guardrails so focused work emits Task Packets instead of direct execution in PM thread.",
+  "fullPrompt": "Implement and document enforcement rules so Project manager defaults to delegation for focused implementation work. Add clear guardrails in Master Control rules and operator instructions: when a focused task is detected, create packet-first output; when skipped, explicit exception line must appear. Validate with at least one reproducible scenario.",
+  "doneCriteria": "Rules are explicit, packet-first behavior is documented and test scenario proves expected output pattern.",
+  "reportBack": "Append summary to docs/master-control.md with enforcement changes and validation result.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

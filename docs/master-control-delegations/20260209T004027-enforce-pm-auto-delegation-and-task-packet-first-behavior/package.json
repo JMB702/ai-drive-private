@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T004027-enforce-pm-auto-delegation-and-task-packet-first-behavior",
+  "createdAt": "2026-02-09T00:40:27.467Z",
+  "title": "Enforce PM auto-delegation and task-packet-first behavior",
+  "targetThread": "Project Manager Delegation Enforcement",
+  "problem": "Project manager handled a focused UI task directly when it should have delegated via Master Control task packet flow. We need deterministic behavior so PM defaults to packet-first delegation for focused work and explicitly suggests creating a new thread when no existing thread clearly matches.",
+  "fullPrompt": "Implement enforcement so Project manager behavior is task-packet-first for focused implementation requests. Add policy checks and UX/ops support so when a focused task is detected, PM creates a delegation package and outputs a compact Task Packet. If no focused thread matches, recommend creating a new thread and reflect that clearly in operator instructions. Add/adjust docs and any lightweight validations so this behavior is stable.",
+  "doneCriteria": "1) Rules clearly state packet-first delegation for focused tasks. 2) Unknown focused areas produce explicit 'create new thread' recommendation. 3) Output format remains compact: destination/model guidance outside packet, packet body tool-access only. 4) Verification steps included.",
+  "reportBack": "Append summary in docs/master-control.md with task, outcome, changed files, and any open items.",
+  "suggestedModel": "gpt-5",
+  "modelReason": "High complexity or cross-cutting work. Use the strongest reasoning model.",
+  "suggestedEffort": "high",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

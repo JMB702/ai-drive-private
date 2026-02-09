@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T000302-one-step-start-command-auto-bootstrap",
+  "createdAt": "2026-02-09T00:03:02.011Z",
+  "title": "One-Step Start Command Auto-Bootstrap",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Current Master Control UI/onboarding is too complex for operators. User expects a single start command pasted into a thread to make that thread fetch prompt from Master Control and perform any required bootstrap/setup automatically.",
+  "fullPrompt": "Design and implement a one-step start-command flow: when a Task Packet is pasted into a sub-thread, that thread should be able to execute setup automatically with no manual bootstrap decisions from the user. Remove operator-facing bootstrap complexity from the primary path and make setup deterministic and safe for existing repos.",
+  "doneCriteria": "A thread can start from one pasted packet/command and handle setup itself; no extra bootstrap UI steps required for normal usage.",
+  "reportBack": "Append summary with exact behavior changes, command format, and user-flow before/after.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Workflow-critical UX behavior requiring careful flow design and validation.",
+  "suggestedEffort": "medium",
+  "modelSource": "user",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

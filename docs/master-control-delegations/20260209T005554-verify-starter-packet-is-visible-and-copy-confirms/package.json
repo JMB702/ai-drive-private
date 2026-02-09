@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T005554-verify-starter-packet-is-visible-and-copy-confirms",
+  "createdAt": "2026-02-09T00:55:54.549Z",
+  "title": "Verify starter packet is visible and copy confirms",
+  "targetThread": "Master Control Ops QA",
+  "problem": "Need post-fix validation that starter packet content is visible in UI and copy action gives clear confirmation.",
+  "fullPrompt": "After Master Control UI completes the fix for blank starter packet field, validate on localhost:4210 that starter packet text is visible on initial load and after target repo path change, and that Copy Starter Packet gives visible confirmation feedback. Document pass/fail and exact repro if any failures remain.",
+  "doneCriteria": "QA pass/fail with exact steps and observed UI state; summary appended.",
+  "reportBack": "Append summary to docs/master-control.md with validation result and any regressions.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

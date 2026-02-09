@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012232-sectioned-master-plan-index-and-selective-retrieval",
+  "createdAt": "2026-02-09T01:22:32.924Z",
+  "title": "Sectioned master plan index and selective retrieval",
+  "targetThread": "Plan Section Indexing",
+  "problem": "Project manager should not load whole master plan by default. Need sectioned plan with explicit titles and selective read/expand behavior.",
+  "fullPrompt": "Implement section-based master plan model: each section has stable id, title, short summary, detail body, owner thread, status, and last-updated metadata. Add endpoints and storage access patterns for list (summary-only), detail-by-section, and selective update. Ensure PM default read path returns only section headers/summaries + unread proposal signals, with explicit expand for detail.",
+  "doneCriteria": "Section index + selective retrieval works without full-plan load; schema documented and integrated into PM workflow.",
+  "reportBack": "Append summary to docs/master-control.md with schema and retrieval behavior details.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

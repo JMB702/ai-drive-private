@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T000714-one-step-start-command-and-auto-setup-ux",
+  "createdAt": "2026-02-09T00:07:14.311Z",
+  "title": "One-Step Start Command and Auto-Setup UX",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Current Master Control UI exposes bootstrap complexity. Operator should paste one start command in a sub thread and that thread should self-bootstrap and start work without extra user setup steps.",
+  "fullPrompt": "Implement a one-step handoff flow: Task Packet should be enough for a sub thread to fetch its prompt from Master Control Ops and execute setup automatically (including any needed project bootstrap checks) with no extra operator decisions. Remove or de-emphasize bootstrap-heavy UI from primary path and keep advanced setup behind secondary controls.",
+  "doneCriteria": "User can copy/paste one command/packet into a sub thread and that thread starts immediately, handling setup itself. UI no longer blocks operator with bootstrap complexity for normal use.",
+  "reportBack": "Append summary with before/after flow, exact start command behavior, and verification evidence.",
+  "suggestedModel": "gpt-5",
+  "modelReason": "Workflow-critical UX and behavior changes with cross-cutting impact.",
+  "suggestedEffort": "high",
+  "modelSource": "user",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T232557-mc-optimization-task-packet-prompt-quality-tightening",
+  "createdAt": "2026-02-08T23:25:57.255Z",
+  "title": "MC Optimization: Task Packet Prompt Quality Tightening",
+  "targetThread": "Delegation Prompt Quality",
+  "problem": "Task Packets need high signal-to-noise and deterministic start instructions for focused threads.",
+  "fullPrompt": "Audit current Task Packet wording for ambiguity, verbosity, and missing constraints. Propose an improved packet template that starts work faster and reduces clarification loops.",
+  "doneCriteria": "Revised packet template and explicit before/after examples.",
+  "reportBack": "Append summary with template recommendations and rationale.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

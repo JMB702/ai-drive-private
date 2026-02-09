@@ -1,0 +1,11 @@
+{
+  "name": "master-control-ops",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "harness:orchestration-compliance": "node scripts/orchestration-compliance-harness.mjs"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T232557-mc-optimization-asset-handoff-durability",
+  "createdAt": "2026-02-08T23:25:57.261Z",
+  "title": "MC Optimization: Asset Handoff Durability",
+  "targetThread": "Asset Handoff Reliability",
+  "problem": "Task Packets that include assets must make attached files discoverable and consumable without manual path fixing.",
+  "fullPrompt": "Validate asset attachment paths in Task Packets and package folders. Identify break points and propose robust asset manifest behavior for sub-thread execution.",
+  "doneCriteria": "Reliable asset handoff checklist with failing/passing cases.",
+  "reportBack": "Append summary with reliability score and concrete fixes.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

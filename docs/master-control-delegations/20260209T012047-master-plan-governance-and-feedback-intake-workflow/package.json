@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012047-master-plan-governance-and-feedback-intake-workflow",
+  "createdAt": "2026-02-09T01:20:47.097Z",
+  "title": "Master plan governance and feedback intake workflow",
+  "targetThread": "Master Plan Governance",
+  "problem": "Master Control needs a planning-first workflow: a persistent master plan created from first completed Codex plan, editable by Project manager, and a sub-thread recommendation mechanism that does not force full-context ingestion.",
+  "fullPrompt": "Implement backend/state workflow for Master Plan + Plan Change Proposals + Decision Log. Requirements: 1) Master plan storage with versioning and last-updated metadata, 2) API to set initial plan from first completed plan and update by Project manager, 3) sub-thread proposal endpoint for recommended plan changes (pending by default), 4) Project manager approve/reject endpoint that appends a decision log entry and updates plan version on approve, 5) unread feedback/proposal counts and query filters so PM can consume only relevant items. Keep payloads compact and explicit.",
+  "doneCriteria": "APIs and persistence implemented with clear schema, proposal lifecycle works end-to-end (submit -> pending -> approve/reject), and PM can fetch filtered unread items without loading full history.",
+  "reportBack": "Append summary to docs/master-control.md with schema/API contract, files changed, and integration notes for UI thread.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Moderate implementation scope with some reasoning depth.",
+  "suggestedEffort": "medium",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

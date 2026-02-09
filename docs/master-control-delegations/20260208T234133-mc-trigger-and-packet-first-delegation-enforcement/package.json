@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T234133-mc-trigger-and-packet-first-delegation-enforcement",
+  "createdAt": "2026-02-08T23:41:33.324Z",
+  "title": "MC Trigger and Packet-First Delegation Enforcement",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Main thread must treat mc// as explicit master-control routing trigger and always output paste-ready tool-linked Task Packets for sub-thread work.",
+  "fullPrompt": "Define and verify operational rules for mc// trigger handling and packet-first delegation flow. Ensure this rule is explicit: when input begins with mc//, main thread generates a focused sub-thread prompt, stores it in Master Control Ops, and returns a Task Packet text that instructs sub-thread to fetch prompt from tool and start immediately.",
+  "doneCriteria": "Clear rule set + verification checklist + identified enforcement points in current workflow.",
+  "reportBack": "Append summary with final policy text and any implementation deltas needed.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T230711-delegation-prompt-quality-clarity-review",
+  "createdAt": "2026-02-08T23:07:11.405Z",
+  "title": "Delegation Prompt Quality - Clarity Review",
+  "targetThread": "Delegation Prompt Quality",
+  "problem": "Delegated prompts must be unambiguous, context-rich, and include strict return-summary instructions.",
+  "fullPrompt": "Review generated sub-thread prompts for clarity, completeness, and actionability. Identify ambiguous instructions, missing context, or missing verification requirements. Propose revised prompt patterns that reduce back-and-forth.",
+  "doneCriteria": "List of prompt-quality issues and an improved prompt template proposal.",
+  "reportBack": "Append summary with quality findings and proposed template changes.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

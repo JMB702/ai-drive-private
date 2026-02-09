@@ -1,0 +1,15 @@
+{
+  "packageId": "20260208T230711-thread-lifecycle-rules-unknown-thread-policy",
+  "createdAt": "2026-02-08T23:07:11.413Z",
+  "title": "Thread Lifecycle Rules - Unknown Thread Policy",
+  "targetThread": "Thread Lifecycle Rules",
+  "problem": "Main thread needs deterministic behavior when target thread does not exist in the current thread map.",
+  "fullPrompt": "Validate unknown-thread detection and recommendation flow. Confirm behavior when thread exists vs missing, and ensure guidance is explicit and non-blocking. Propose rule refinements if there are edge-case failures.",
+  "doneCriteria": "Behavior matrix for known vs unknown thread targets and rule refinement suggestions.",
+  "reportBack": "Append summary with lifecycle rule validation results and recommended policy updates.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

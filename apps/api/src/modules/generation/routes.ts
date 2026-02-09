@@ -3,6 +3,11 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { createAsset, createAssetVersion, createGenerationJob, estimateCredits, finalizeCredits, reserveCredits } from "../../lib/services.js";
 import { getActorId, requireWorkspaceMember } from "../../lib/auth.js";
+import { nowIso } from "../../lib/time.js";
+import { diagnoseGenerationFailure } from "../../lib/generation-failure.js";
+import { sanitizeInlinePreviewMetadata } from "../../lib/media-preview.js";
+
+const MAX_LIST_TERMINAL_JOBS = 300;
 
 const generationRequestSchema = z.object({
   workspaceId: z.string(),
@@ -21,10 +26,97 @@ const batchMoveJobsSchema = z.object({
   folderId: z.string()
 });
 
-function isPromptBlocked(prompt: string): boolean {
-  const blockedTokens = ["csam", "terror propaganda", "explicit minor"];
+const batchDeleteJobsSchema = z.object({
+  workspaceId: z.string(),
+  jobIds: z.array(z.string()).min(1)
+});
+
+const LOCAL_PROMPT_BLOCKED_TOKENS = ["csam", "terror propaganda", "explicit minor"] as const;
+
+function promptBlockMatches(prompt: string): string[] {
   const lower = prompt.toLowerCase();
-  return blockedTokens.some((token) => lower.includes(token));
+  return LOCAL_PROMPT_BLOCKED_TOKENS.filter((token) => lower.includes(token));
+}
+
+function blockedPreviewDimensions(aspectRatio: string): { width: number; height: number } {
+  const match = aspectRatio.match(/^(\d+):(\d+)$/);
+  if (!match) return { width: 1080, height: 1080 };
+  const widthUnit = Number(match[1]);
+  const heightUnit = Number(match[2]);
+  if (!widthUnit || !heightUnit) return { width: 1080, height: 1080 };
+
+  const longEdge = 1280;
+  if (widthUnit >= heightUnit) {
+    return {
+      width: longEdge,
+      height: Math.max(256, Math.round((longEdge * heightUnit) / widthUnit))
+    };
+  }
+  return {
+    width: Math.max(256, Math.round((longEdge * widthUnit) / heightUnit)),
+    height: longEdge
+  };
+}
+
+function createBlockedPreviewDataUrl(aspectRatio: string): string {
+  const { width, height } = blockedPreviewDimensions(aspectRatio);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#171c2c"/><stop offset="100%" stop-color="#252d44"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.12)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.76)}" rx="${Math.max(20, Math.round(Math.min(width, height) * 0.04))}" fill="rgba(6,10,20,0.54)" stroke="rgba(243,245,252,0.22)" stroke-width="2"/><text x="50%" y="47%" text-anchor="middle" fill="#f7f9ff" font-family="Arial, sans-serif" font-size="${Math.max(30, Math.round(Math.min(width, height) * 0.07))}" font-weight="700">Blocked</text><text x="50%" y="58%" text-anchor="middle" fill="#c8d0de" font-family="Arial, sans-serif" font-size="${Math.max(16, Math.round(Math.min(width, height) * 0.032))}">Content policy prevented generation</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function sanitizeLine(value: string, max = 88): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  const limited = compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
+  return limited.replace(/[<>&"]/g, "");
+}
+
+function createFailedPreviewDataUrl(input: {
+  aspectRatio: string;
+  category: string;
+  userMessage: string;
+  suggestedFix: string;
+}): string {
+  const { width, height } = blockedPreviewDimensions(input.aspectRatio);
+  const category = sanitizeLine(input.category, 44);
+  const message = sanitizeLine(input.userMessage, 74);
+  const fix = sanitizeLine(input.suggestedFix, 74);
+  const titleSize = Math.max(28, Math.round(Math.min(width, height) * 0.065));
+  const detailSize = Math.max(14, Math.round(Math.min(width, height) * 0.03));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#2a1a30"/><stop offset="100%" stop-color="#1b2234"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#bg)"/><rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.12)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.76)}" rx="${Math.max(20, Math.round(Math.min(width, height) * 0.04))}" fill="rgba(7,10,20,0.6)" stroke="rgba(255,128,168,0.4)" stroke-width="2"/><text x="50%" y="41%" text-anchor="middle" fill="#ffe9f0" font-family="Arial, sans-serif" font-size="${titleSize}" font-weight="700">Failed</text><text x="50%" y="52%" text-anchor="middle" fill="#ffc9d8" font-family="Arial, sans-serif" font-size="${detailSize}" font-weight="700">${category}</text><text x="50%" y="62%" text-anchor="middle" fill="#e9dfef" font-family="Arial, sans-serif" font-size="${detailSize}">${message}</text><text x="50%" y="72%" text-anchor="middle" fill="#c6d4ea" font-family="Arial, sans-serif" font-size="${detailSize}">Fix: ${fix}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function folderNamePrefix(app: FastifyInstance, folderId: string): string {
+  const folder = app.ctx.store.folders.find((item) => item.id === folderId);
+  const raw = (folder?.name ?? "image")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return raw.length > 0 ? raw : "image";
+}
+
+function nextFolderAssetName(app: FastifyInstance, folderId: string, extension: string): string {
+  const prefix = folderNamePrefix(app, folderId);
+  const pattern = new RegExp(`^${escapeRegex(prefix)}-(\\d+)(?:\\.[A-Za-z0-9]+)?$`, "i");
+  let max = 0;
+  for (const asset of app.ctx.store.assets) {
+    if (asset.folderId !== folderId) continue;
+    const base = asset.name.replace(/\.[A-Za-z0-9]+$/, "");
+    const match = base.match(pattern);
+    if (!match) continue;
+    const seq = Number.parseInt(match[1], 10);
+    if (Number.isFinite(seq) && seq > max) {
+      max = seq;
+    }
+  }
+  const next = String(max + 1).padStart(4, "0");
+  return `${prefix}-${next}.${extension}`;
 }
 
 export async function registerGenerationRoutes(app: FastifyInstance): Promise<void> {
@@ -72,15 +164,21 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
       }
 
       if (body.folderId) {
+        const extension = body.type === "VIDEO" ? "mp4" : "png";
         const generatedAsset = createAsset({
           workspaceId: body.workspaceId,
           folderId: body.folderId,
-          name: `generated-${Date.now()}.${body.type === "VIDEO" ? "mp4" : "png"}`,
+          name: nextFolderAssetName(app, body.folderId, extension),
           mimeType: body.type === "VIDEO" ? "video/mp4" : "image/png",
           createdBy: actorId,
-          tags: ["generated", body.model]
+          tags: ["generated", body.model, `job:${job.id}`]
         });
         app.ctx.store.assets.push(generatedAsset);
+        const existingOrder = app.ctx.store.folderLayouts[body.folderId] ?? [];
+        app.ctx.store.folderLayouts[body.folderId] = [
+          generatedAsset.id,
+          ...existingOrder.filter((id) => id !== generatedAsset.id)
+        ];
 
         const metadata = {
           ...job.result.providerMetadata,
@@ -105,6 +203,86 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
     }
 
     finalizeCredits(app.ctx.store, workspaceId, jobId, creditCost, 0);
+
+    if (body.type !== "IMAGE") {
+      return;
+    }
+
+    const aspectRatio = typeof body.settings.aspectRatio === "string" ? body.settings.aspectRatio : "1:1";
+    const resolution = typeof body.settings.resolution === "string" ? body.settings.resolution : "1K";
+    const failure = job.failure ?? diagnoseGenerationFailure({
+      request: job.request,
+      provider: "unknown",
+      error: job.error ?? "Generation failed"
+    });
+    const metadata = {
+      failed: true,
+      failureCategory: failure.category,
+      failureMessage: failure.userMessage,
+      failureSuggestedFix: failure.suggestedFix,
+      failureRawMessage: failure.rawMessage.slice(0, 1400),
+      generationJobId: job.id,
+      model: body.model,
+      prompt: body.prompt,
+      aspectRatio,
+      resolution,
+      quality: typeof body.settings.quality === "string" ? body.settings.quality : resolution,
+      previewDataUrl: createFailedPreviewDataUrl({
+        aspectRatio,
+        category: failure.category,
+        userMessage: failure.userMessage,
+        suggestedFix: failure.suggestedFix
+      })
+    };
+
+    if (body.assetId) {
+      createAssetVersion({
+        store: app.ctx.store,
+        assetId: body.assetId,
+        source: "GENERATE",
+        storageKey: `failed/${body.workspaceId}/${job.id}.png`,
+        checksum: `failed-${job.id}`,
+        metadata,
+        createdBy: actorId
+      });
+      const existingAsset = app.ctx.store.assets.find((asset) => asset.id === body.assetId);
+      if (existingAsset) {
+        const nextTags = new Set(existingAsset.tags);
+        nextTags.add("failed");
+        nextTags.add(`job:${job.id}`);
+        existingAsset.tags = [...nextTags];
+      }
+      return;
+    }
+
+    if (!body.folderId) {
+      return;
+    }
+
+    const generatedAsset = createAsset({
+      workspaceId: body.workspaceId,
+      folderId: body.folderId,
+      name: nextFolderAssetName(app, body.folderId, "png"),
+      mimeType: "image/png",
+      createdBy: actorId,
+      tags: ["generated", "failed", body.model, `job:${job.id}`]
+    });
+    app.ctx.store.assets.push(generatedAsset);
+    const existingOrder = app.ctx.store.folderLayouts[body.folderId] ?? [];
+    app.ctx.store.folderLayouts[body.folderId] = [
+      generatedAsset.id,
+      ...existingOrder.filter((id) => id !== generatedAsset.id)
+    ];
+
+    createAssetVersion({
+      store: app.ctx.store,
+      assetId: generatedAsset.id,
+      source: "GENERATE",
+      storageKey: `failed/${body.workspaceId}/${job.id}.png`,
+      checksum: `failed-${job.id}`,
+      metadata,
+      createdBy: actorId
+    });
   }
 
   app.post("/v1/generation/jobs", async (request, reply) => {
@@ -115,8 +293,116 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
       return reply.status(400).send({ error: "Generation requires a target folderId or assetId" });
     }
 
-    if (isPromptBlocked(body.prompt)) {
-      return reply.status(400).send({ error: "Prompt blocked by safety policy" });
+    const blockedTokens = promptBlockMatches(body.prompt);
+    const isBlocked = blockedTokens.length > 0;
+    if (isBlocked) {
+      const aspectRatio = typeof body.settings.aspectRatio === "string" ? body.settings.aspectRatio : "1:1";
+      const resolution = typeof body.settings.resolution === "string" ? body.settings.resolution : "1K";
+      const blockedMessage = "Prompt blocked by safety policy";
+      const job = createGenerationJob({
+        workspaceId: body.workspaceId,
+        createdBy: actor.actorId,
+        request: {
+          workspaceId: body.workspaceId,
+          assetId: body.assetId,
+          folderId: body.folderId,
+          prompt: body.prompt,
+          negativePrompt: body.negativePrompt,
+          model: body.model,
+          type: body.type,
+          settings: body.settings
+        },
+        reservedCredits: 0
+      });
+      job.status = "FAILED";
+      const blockedFailure = diagnoseGenerationFailure({
+        request: job.request,
+        provider: "local-policy",
+        error: blockedMessage,
+        forcedCategory: "SAFETY_BLOCK",
+        debugContextOverrides: {
+          failureOrigin: "LOCAL_POLICY_GATE",
+          policySource: "local-token-filter-v1",
+          policyMatchedTokens: blockedTokens.join(","),
+          policyMatchedCount: blockedTokens.length,
+          providerAttempted: false
+        }
+      });
+      blockedFailure.errorCode = "LOCAL_POLICY_BLOCK";
+      blockedFailure.userMessage = blockedTokens.length > 0
+        ? `Prompt blocked by local safety policy (${blockedTokens.join(", ")}).`
+        : "Prompt blocked by local safety policy.";
+      blockedFailure.suggestedFix = blockedTokens.length > 0
+        ? `Remove blocked term(s): ${blockedTokens.join(", ")} and retry.`
+        : "Revise the prompt to remove disallowed content and retry.";
+      job.error = blockedFailure.userMessage;
+      job.failure = blockedFailure;
+      job.updatedAt = nowIso();
+      app.ctx.store.generationJobs.push(job);
+
+      if (body.type === "IMAGE") {
+        const metadata = {
+          blocked: true,
+          blockedReason: blockedFailure.userMessage,
+          failureCategory: blockedFailure.category,
+          failureMessage: blockedFailure.userMessage,
+          failureSuggestedFix: blockedFailure.suggestedFix,
+          generationJobId: job.id,
+          model: body.model,
+          prompt: body.prompt,
+          aspectRatio,
+          resolution,
+          quality: typeof body.settings.quality === "string" ? body.settings.quality : resolution,
+          previewDataUrl: createBlockedPreviewDataUrl(aspectRatio)
+        };
+
+        if (body.assetId) {
+          createAssetVersion({
+            store: app.ctx.store,
+            assetId: body.assetId,
+            source: "GENERATE",
+            storageKey: `blocked/${body.workspaceId}/${job.id}.png`,
+            checksum: `blocked-${job.id}`,
+            metadata,
+            createdBy: actor.actorId
+          });
+          const existingAsset = app.ctx.store.assets.find((asset) => asset.id === body.assetId);
+          if (existingAsset) {
+            const nextTags = new Set(existingAsset.tags);
+            nextTags.add("blocked");
+            nextTags.add(`job:${job.id}`);
+            existingAsset.tags = [...nextTags];
+          }
+        } else if (body.folderId) {
+          const generatedAsset = createAsset({
+            workspaceId: body.workspaceId,
+            folderId: body.folderId,
+            name: nextFolderAssetName(app, body.folderId, "png"),
+            mimeType: "image/png",
+            createdBy: actor.actorId,
+            tags: ["generated", "blocked", body.model, `job:${job.id}`]
+          });
+          app.ctx.store.assets.push(generatedAsset);
+          const existingOrder = app.ctx.store.folderLayouts[body.folderId] ?? [];
+          app.ctx.store.folderLayouts[body.folderId] = [
+            generatedAsset.id,
+            ...existingOrder.filter((id) => id !== generatedAsset.id)
+          ];
+
+          createAssetVersion({
+            store: app.ctx.store,
+            assetId: generatedAsset.id,
+            source: "GENERATE",
+            storageKey: `blocked/${body.workspaceId}/${job.id}.png`,
+            checksum: `blocked-${job.id}`,
+            metadata,
+            createdBy: actor.actorId
+          });
+        }
+      }
+
+      app.ctx.runtime.jobSubscribers.forEach((subscriber) => subscriber(job));
+      return reply.code(202).send({ job });
     }
 
     const creditCost = estimateCredits(body);
@@ -165,9 +451,22 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
   app.get("/v1/generation/jobs/:workspaceId", async (request, reply) => {
     const { workspaceId } = request.params as { workspaceId: string };
     const actor = requireWorkspaceMember(request, workspaceId);
-    const jobs = app.ctx.store.generationJobs
+    const scopedJobs = app.ctx.store.generationJobs
       .filter((j) => j.workspaceId === workspaceId)
       .filter((j) => actor.role === "OWNER" || actor.role === "ADMIN" || j.createdBy === actor.actorId);
+    const activeJobs = scopedJobs.filter((job) => job.status === "QUEUED" || job.status === "RUNNING");
+    const terminalJobs = scopedJobs
+      .filter((job) => job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELED")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, MAX_LIST_TERMINAL_JOBS);
+    const jobs = [...activeJobs, ...terminalJobs]
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+
+    for (const job of jobs) {
+      if (job.result?.providerMetadata) {
+        sanitizeInlinePreviewMetadata(job.result.providerMetadata);
+      }
+    }
     return { jobs };
   });
 
@@ -182,15 +481,16 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
       return reply.status(400).send({ error: "Destination folder is outside workspace" });
     }
 
-    const jobs = app.ctx.store.generationJobs.filter((job) => body.jobIds.includes(job.id));
-    if (jobs.length !== body.jobIds.length) {
-      return reply.status(404).send({ error: "One or more jobs not found" });
+    const requestedJobIds = new Set(body.jobIds);
+    const jobs = app.ctx.store.generationJobs.filter((job) => requestedJobIds.has(job.id));
+    if (jobs.length === 0) {
+      return { movedCount: 0, jobs: [] };
     }
 
     const forbidden = jobs.some((job) =>
       job.workspaceId !== body.workspaceId ||
       (job.createdBy !== actor.actorId && actor.role !== "OWNER" && actor.role !== "ADMIN") ||
-      (job.status !== "QUEUED" && job.status !== "RUNNING") ||
+      (job.status !== "QUEUED" && job.status !== "RUNNING" && job.status !== "FAILED" && job.status !== "CANCELED") ||
       job.request.type !== "IMAGE"
     );
     if (forbidden) {
@@ -201,6 +501,28 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
       job.request.folderId = body.folderId;
     }
     return { movedCount: jobs.length, jobs };
+  });
+
+  app.delete("/v1/generation/jobs/batch", async (request, reply) => {
+    const body = batchDeleteJobsSchema.parse(request.body);
+    const actor = requireWorkspaceMember(request, body.workspaceId);
+    const requestedJobIds = new Set(body.jobIds);
+    const jobs = app.ctx.store.generationJobs.filter((job) => requestedJobIds.has(job.id));
+    if (jobs.length === 0) {
+      return { deletedCount: 0 };
+    }
+
+    const forbidden = jobs.some((job) =>
+      job.workspaceId !== body.workspaceId ||
+      (job.createdBy !== actor.actorId && actor.role !== "OWNER" && actor.role !== "ADMIN") ||
+      (job.status !== "FAILED" && job.status !== "CANCELED")
+    );
+    if (forbidden) {
+      return reply.status(403).send({ error: "One or more jobs cannot be deleted" });
+    }
+
+    app.ctx.store.generationJobs = app.ctx.store.generationJobs.filter((job) => !requestedJobIds.has(job.id));
+    return { deletedCount: jobs.length };
   });
 
   app.post("/v1/generation/jobs/:jobId/cancel", async (request) => {

@@ -37,3 +37,8 @@ Monorepo for a Google Drive-style file platform with built-in image/video genera
 - Current persistence is in-memory for rapid bootstrapping.
 - SQL schema for Postgres is in `apps/api/src/db/schema.sql`.
 - Provider integrations are adapter-based; Gemini can call API when key is configured.
+
+## Always-on hosting
+- To run AI Drive on an always-on cloud host (so it stays available when your laptop is off), use `docs/always-on-deploy.md`.
+- This deployment keeps generated assets/history on a persistent volume mounted at `/data`.
+- Fastest no-VM path: `docs/render-deploy.md` (Render Blueprint via `render.yaml`).

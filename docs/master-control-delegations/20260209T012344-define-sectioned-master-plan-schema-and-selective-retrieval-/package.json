@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T012344-define-sectioned-master-plan-schema-and-selective-retrieval-",
+  "createdAt": "2026-02-09T01:23:44.665Z",
+  "title": "Define sectioned master plan schema and selective retrieval API",
+  "targetThread": "Master Plan Governance",
+  "problem": "Project manager must avoid loading the full master plan each turn. Need section-level plan model and retrieval paths that default to summary/index and expand only on demand.",
+  "fullPrompt": "Design and implement sectioned master plan backend contract: section ids, titles, summaries, details, status, owner thread, updated metadata. Add APIs for section index (summary-only), section detail by id, targeted section update, and proposal linkage. Enforce default PM read path = index only. Include unread proposal counters and filters to keep context usage low.",
+  "doneCriteria": "Sectioned schema/API works and PM can retrieve index without full plan body; detail expands only on explicit section request.",
+  "reportBack": "Append summary in docs/master-control.md with API schema, endpoints, and context-budget behavior details.",
+  "suggestedModel": "gpt-5-nano",
+  "modelReason": "Narrow and well-scoped task where fast iteration is enough.",
+  "suggestedEffort": "low",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}

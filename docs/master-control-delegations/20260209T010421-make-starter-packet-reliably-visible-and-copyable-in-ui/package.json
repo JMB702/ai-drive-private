@@ -1,0 +1,16 @@
+{
+  "packageId": "20260209T010421-make-starter-packet-reliably-visible-and-copyable-in-ui",
+  "createdAt": "2026-02-09T01:04:21.176Z",
+  "title": "Make starter packet reliably visible and copyable in UI",
+  "targetThread": "Master Control UI",
+  "problem": "User needs to open Master Control Ops in any project, immediately see a non-blank Project Manager Starter Packet, copy it, and paste it into a new project thread. Current behavior is blank in the UI for user.",
+  "fullPrompt": "Implement robust UI behavior for Project Manager Starter Packet so it is never silently blank when backend has data. Ensure packet is populated on initial load and after target repo path changes. Add explicit visible error/warning state if packet payload is empty/missing and include remediation text. Ensure Copy Starter Packet provides unmistakable success confirmation visible to user. Keep starter packet section prominent and first-class for new-project onboarding.",
+  "doneCriteria": "1) Starter packet textarea shows non-empty content on initial load. 2) Copy Starter Packet gives clear visible confirmation. 3) Missing payload shows prominent warning with remediation. 4) User can copy-paste into another project thread and start setup. 5) Append summary to master control.",
+  "reportBack": "Append summary in docs/master-control.md including root cause, exact UI/API fix, files changed, verification steps, and open items.",
+  "suggestedModel": "gpt-5-mini",
+  "modelReason": "Moderate implementation scope with some reasoning depth.",
+  "suggestedEffort": "medium",
+  "modelSource": "auto",
+  "masterControlPath": "/Users/jeffburt/Documents/AI Project/docs/master-control.md",
+  "assets": []
+}
