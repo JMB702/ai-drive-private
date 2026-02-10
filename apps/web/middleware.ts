@@ -13,7 +13,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   const { pathname, search } = request.nextUrl;
-  if (pathname === "/sign-in" || pathname.startsWith("/api/auth/")) {
+  if (
+    pathname === "/sign-in" ||
+    pathname === "/api/health" ||
+    pathname.startsWith("/api/auth/")
+  ) {
     return NextResponse.next();
   }
 
