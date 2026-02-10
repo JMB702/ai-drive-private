@@ -1,7 +1,10 @@
 export const WORKSPACE_ID = "ws_demo";
 export const TARGET_PROJECT_STORAGE_KEY = "aidrive:lastTargetProjectId";
 export const SAMPLE_PROJECT_COUNT = 8;
-export const AUTO_SEED_SAMPLE_PROJECTS = true;
+const autoSeedOverride = process.env.NEXT_PUBLIC_AUTO_SEED_SAMPLE_PROJECTS?.trim().toLowerCase();
+export const AUTO_SEED_SAMPLE_PROJECTS = autoSeedOverride
+  ? autoSeedOverride === "1" || autoSeedOverride === "true" || autoSeedOverride === "yes" || autoSeedOverride === "on"
+  : process.env.NODE_ENV !== "production";
 
 export const SAMPLE_PROJECT_NAMES = Array.from({ length: SAMPLE_PROJECT_COUNT }, (_, i) =>
   `Sample Project ${String(i + 1).padStart(2, "0")}`

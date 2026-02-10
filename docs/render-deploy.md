@@ -35,7 +35,11 @@ If Render starts with sample/empty data, your old images are still local. Migrat
 2. Export your Render app credentials in terminal:
    - `export APP_ACCESS_USERNAME='...'`
    - `export APP_ACCESS_PASSWORD='...'`
+   - Optional if you already have a browser session cookie:
+     `export APP_ACCESS_COOKIE='aidrive_access=...'`
 3. Run migration:
+   - `MIGRATE_DRY_RUN=1 TARGET_URL='https://ai-drive-private.onrender.com' npm run migrate:remote-data`
+   - Confirm it selected the correct local store path (not an empty sample store).
    - `TARGET_URL='https://ai-drive-private.onrender.com' npm run migrate:remote-data`
 4. Hard refresh Render app in browser.
 

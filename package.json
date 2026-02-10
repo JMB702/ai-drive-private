@@ -14,6 +14,7 @@
     "dev:reset": "npm run -w @aidrive/web clean && npm run dev",
     "start:prod": "node scripts/prod-supervisor.mjs",
     "migrate:remote-data": "node scripts/migrate-local-data-to-remote.mjs",
+    "recover:preview-data": "node scripts/rebuild-store-from-previews.mjs",
     "test": "npm run -w @aidrive/api test",
     "lint": "npm run -ws lint"
   },
