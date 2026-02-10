@@ -565,6 +565,7 @@ export function GlobalGeneratePanel() {
   const [isDropActive, setIsDropActive] = useState(false);
   const [keyboardPressingGenerate, setKeyboardPressingGenerate] = useState(false);
   const [toolsCollapsed, setToolsCollapsed] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const referencePickerRef = useRef<HTMLInputElement | null>(null);
   const projectMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -608,11 +609,16 @@ export function GlobalGeneratePanel() {
     const folderSummary = selectedProjectName ?? "No destination folder";
     return `${modelsSummary} · Folder: ${folderSummary}`;
   }, [modelConfigs, selectedModels, selectedProjectName]);
+  const toolsCanCollapse = isMobileViewport;
+  const toolsPanelCollapsed = toolsCanCollapse ? toolsCollapsed : false;
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     promptByProjectRef.current = readPromptByProject();
     refsByProjectRef.current = readRefsByProjectFromLocalStorage();
     settingsByProjectRef.current = readSettingsByProject();
+    const mobileViewport = window.matchMedia("(max-width: 980px)").matches;
+    setIsMobileViewport(mobileViewport);
     try {
       const stored = window.localStorage.getItem(TOOLS_COLLAPSED_STORAGE_KEY);
       if (stored === "1") {
@@ -620,12 +626,27 @@ export function GlobalGeneratePanel() {
       } else if (stored === "0") {
         setToolsCollapsed(false);
       } else {
-        setToolsCollapsed(window.matchMedia("(max-width: 980px)").matches);
+        setToolsCollapsed(mobileViewport);
       }
     } catch {
-      setToolsCollapsed(window.matchMedia("(max-width: 980px)").matches);
+      setToolsCollapsed(mobileViewport);
     }
     setPromptLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(max-width: 980px)");
+    const syncViewport = (event?: MediaQueryListEvent) => {
+      setIsMobileViewport(event ? event.matches : mediaQuery.matches);
+    };
+    syncViewport();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncViewport);
+      return () => mediaQuery.removeEventListener("change", syncViewport);
+    }
+    mediaQuery.addListener(syncViewport);
+    return () => mediaQuery.removeListener(syncViewport);
   }, []);
 
   useEffect(() => {
@@ -767,6 +788,17 @@ export function GlobalGeneratePanel() {
   }, []);
 
   const canSubmit = panelState.canSubmit && selectedModels.length > 0;
+
+  function toggleToolsPanel(): void {
+    if (!toolsCanCollapse) return;
+    setToolsCollapsed((value) => {
+      const next = !value;
+      if (next && projectMenuRef.current) {
+        projectMenuRef.current.open = false;
+      }
+      return next;
+    });
+  }
 
   function resizePromptInput(): void {
     const input = promptInputRef.current;
@@ -1308,11 +1340,26 @@ export function GlobalGeneratePanel() {
           />
         </div>
 
-        <div className={`dock-tools ${toolsCollapsed ? "collapsed" : "expanded"}`}>
+        <div className={`dock-tools ${toolsPanelCollapsed ? "collapsed" : "expanded"} ${toolsCanCollapse ? "mobile-collapsible" : "desktop-static"}`}>
+          {toolsCanCollapse ? (
+            <button
+              className={`dock-tools-surface ${toolsPanelCollapsed ? "collapsed" : "expanded"}`}
+              type="button"
+              aria-label={toolsPanelCollapsed ? "Expand generation tools" : "Collapse generation tools"}
+              title={toolsPanelCollapsed ? "Expand tools" : "Collapse tools"}
+              aria-expanded={!toolsPanelCollapsed}
+              aria-controls="generation-tools"
+              onClick={toggleToolsPanel}
+            >
+              <span className="dock-tools-surface-title">Generation tools</span>
+              <span className="dock-tools-surface-summary">{collapsedToolsSummary}</span>
+              <span className="dock-tools-surface-hint">{toolsPanelCollapsed ? "Tap to expand" : "Tap to collapse"}</span>
+            </button>
+          ) : null}
           <div
-            className={`dock-tools-panel ${toolsCollapsed ? "collapsed" : "expanded"}`}
+            className={`dock-tools-panel ${toolsPanelCollapsed ? "collapsed" : "expanded"}`}
             id="generation-tools"
-            aria-hidden={toolsCollapsed}
+            aria-hidden={toolsPanelCollapsed}
           >
             <div className="dock-controls">
               <select className="dock-chip" value={modelKey} onChange={(e) => onChooseModel(e.target.value as ModelKey)}>
@@ -1424,28 +1471,9 @@ export function GlobalGeneratePanel() {
           </div>
         </div>
 
-        <button
-          className={`dock-tools-toggle ${toolsCollapsed ? "collapsed" : "expanded"}`}
-          type="button"
-          aria-label={toolsCollapsed ? "Expand generation tools" : "Collapse generation tools"}
-          title={toolsCollapsed ? "Expand tools" : "Collapse tools"}
-          aria-expanded={!toolsCollapsed}
-          aria-controls="generation-tools"
-          onClick={() => {
-            if (!toolsCollapsed && projectMenuRef.current) {
-              projectMenuRef.current.open = false;
-            }
-            setToolsCollapsed((value) => !value);
-          }}
-        >
-          <span aria-hidden="true">⚙</span>
-        </button>
-
         <div className="dock-submit">
           {folders.length === 0 ? (
             <p className="dock-note">Create your first project to unlock generation.</p>
-          ) : toolsCollapsed ? (
-            <p className="dock-note dock-note-collapsed">{collapsedToolsSummary}</p>
           ) : null}
 
           <button className={`generate-btn ${keyboardPressingGenerate ? "keyboard-press" : ""}`} type="submit" disabled={!canSubmit}>
