@@ -34,6 +34,16 @@ Auth (dev): pass `x-user-id` header.
 - `POST /generation/jobs/:jobId/cancel`
 - `POST /generation/jobs/:jobId/retry`
 - `GET /realtime/jobs/stream` (SSE)
+- `GET /ui/profile`
+
+- `GET /diagnostics/incidents?status=&severity=&since=&limit=`
+- `GET /diagnostics/incidents/:incidentId`
+- `POST /diagnostics/incidents/:incidentId/ack`
+- `POST /diagnostics/incidents/:incidentId/resolve`
+- `GET /diagnostics/incidents/:incidentId/packet`
+- `GET /diagnostics/incidents/:incidentId/prompts`
+- `GET /diagnostics/events?severity=&category=&eventName=&incidentId=&since=&limit=&cursor=`
+- `POST /diagnostics/ingest`
 
 - `POST /sharing/invite`
 - `POST /sharing/links`

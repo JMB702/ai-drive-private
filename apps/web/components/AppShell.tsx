@@ -10,12 +10,30 @@ import { CreateProjectModal } from "./CreateProjectModal";
 import { NotificationCenter } from "./NotificationCenter";
 import { ClientErrorBoundary } from "./ClientErrorBoundary";
 
+function runtimeTabTitle(hostname: string): string {
+  const normalized = hostname.trim().toLowerCase();
+  if (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized.endsWith(".local")
+  ) {
+    return "Working";
+  }
+  return "Deployed";
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isAuthRoute = pathname?.startsWith("/sign-in") ?? false;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(true);
   const [viewportReady, setViewportReady] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    document.title = runtimeTabTitle(window.location.hostname);
+  }, []);
 
   useEffect(() => {
     if (isAuthRoute) return;
@@ -58,13 +76,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     setSidebarOpen(false);
   };
 
-  const shellCollapsed = !viewportReady || (isMobile && !sidebarOpen);
+  const shellCollapsed = !viewportReady || !sidebarOpen;
 
   return (
     <ProjectsProvider>
       <ClientErrorBoundary>
         <div className={`rebuild-shell ${shellCollapsed ? "sidebar-collapsed" : ""}`}>
-          {viewportReady && isMobile ? (
+          {viewportReady ? (
             <button
               className="sidebar-toggle"
               type="button"

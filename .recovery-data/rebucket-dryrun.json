@@ -1,0 +1,340 @@
+[
+  {
+    "assetId": "83d69a59-7eb0-4cf5-9bf3-b25797929be4",
+    "assetName": "recovered-0001.png",
+    "blob": "a1413ffb2162dfbeceec128f4ffee55395f04901.png",
+    "suggestedFolder": "McDonald’s World",
+    "confidence": 1.0,
+    "rationale": "The image shows a car designed to look like a McDonald's burger.",
+    "createdAt": "2026-02-10T00:56:12.956Z"
+  },
+  {
+    "assetId": "a216e205-07af-41c3-949c-c7f4f7873d77",
+    "assetName": "recovered-0002.png",
+    "blob": "346144f58a75e5125ffd37c3575b9fb0297f5af5.png",
+    "suggestedFolder": "McDonald’s World",
+    "confidence": 1.0,
+    "rationale": "The image shows a car with McDonald's branding and a McDonald's restaurant.",
+    "createdAt": "2026-02-09T23:40:15.527Z"
+  },
+  {
+    "assetId": "fcb0122b-33cb-429b-ac41-6d125584346d",
+    "assetName": "recovered-0003.png",
+    "blob": "52f9959feda23b83bea8a6df43cbfad0d4019986.png",
+    "suggestedFolder": "Jeff go to bed",
+    "confidence": 0.95,
+    "rationale": "The image shows a bedroom at night, suggesting it's time to sleep.",
+    "createdAt": "2026-02-09T13:42:40.646Z"
+  },
+  {
+    "assetId": "0d56d9f2-7397-499b-8efe-644ce4888252",
+    "assetName": "recovered-0004.png",
+    "blob": "17ec7f85aa13773439091c99f9a0f9835117dfba.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 1.0,
+    "rationale": "The image contains three dogs on a beach, making 'Dogs' the best fit.",
+    "createdAt": "2026-02-09T07:58:48.945Z"
+  },
+  {
+    "assetId": "1a9ecd3e-9a37-42ee-b8f3-50b9ea73033d",
+    "assetName": "recovered-0005.png",
+    "blob": "b3174ecf0245467d05c7e9c198225940a009028f.png",
+    "suggestedFolder": "Jeff go to bed",
+    "confidence": 0.95,
+    "rationale": "The image shows a bedroom at night, suggesting it's time to sleep.",
+    "createdAt": "2026-02-09T07:57:26.733Z"
+  },
+  {
+    "assetId": "82b9362a-eb7a-4f15-a235-feb301c13088",
+    "assetName": "recovered-0006.png",
+    "blob": "0ce377ce238540cf93112f07df78009ee9480d6c.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 0.99,
+    "rationale": "The image clearly shows three dogs on a beach, making 'Dogs' the best fit.",
+    "createdAt": "2026-02-09T07:47:56.922Z"
+  },
+  {
+    "assetId": "2ed2dd91-c082-4c5e-a13e-230bd7b39b2d",
+    "assetName": "recovered-0007.png",
+    "blob": "0342b2320542697bbfd3db3feabcea1496936d07.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 1.0,
+    "rationale": "The image shows a white puppy in a field of dandelions.",
+    "createdAt": "2026-02-09T07:47:11.878Z"
+  },
+  {
+    "assetId": "5d56e533-43bf-47de-924d-1cf55fd7e2b8",
+    "assetName": "recovered-0008.png",
+    "blob": "5394ffdef68a7755ad1f69a92f24a3b31be4f972.png",
+    "suggestedFolder": "Cake",
+    "confidence": 1.0,
+    "rationale": "The image shows a cake on a road at sunset, so 'Cake' is appropriate.",
+    "createdAt": "2026-02-09T07:00:45.296Z"
+  },
+  {
+    "assetId": "1634ea77-8e9c-4572-a78f-006aa4ce057b",
+    "assetName": "recovered-0009.png",
+    "blob": "2c0daa0a3c3ace3f73fe78e1a38409b13fd51284.png",
+    "suggestedFolder": "Cake",
+    "confidence": 1.0,
+    "rationale": "The image shows a three-tiered cake on a road, so 'Cake' is appropriate.",
+    "createdAt": "2026-02-09T07:00:38.134Z"
+  },
+  {
+    "assetId": "6556a8d2-bc3f-4dbd-8a43-7903fca8a69b",
+    "assetName": "recovered-0010.png",
+    "blob": "b7c14cf4b9f6508be19e71c9a20a48e274fb625a.png",
+    "suggestedFolder": "Cake",
+    "confidence": 1.0,
+    "rationale": "The image shows a chocolate cake with raspberries and chocolate curls on top.",
+    "createdAt": "2026-02-09T06:54:13.521Z"
+  },
+  {
+    "assetId": "2b94ac4b-dfdd-4deb-8627-948ae906003b",
+    "assetName": "recovered-0011.png",
+    "blob": "a3f6abd946df4b279f8021b12aacc3e06682afb1.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 0.99,
+    "rationale": "The image shows multiple dogs on a beach, making 'Dogs' the best fit.",
+    "createdAt": "2026-02-09T06:04:13.213Z"
+  },
+  {
+    "assetId": "bd9b7ad9-f235-4da2-adae-07eae78cb552",
+    "assetName": "recovered-0012.png",
+    "blob": "df23e2580de862edc045e734fa37748ffe7d1fdb.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.95,
+    "rationale": "The image shows a dog dressed as a wizard, with magical elements.",
+    "createdAt": "2026-02-09T06:03:48.535Z"
+  },
+  {
+    "assetId": "ac7448ce-1742-49b2-879d-138fae2d8a92",
+    "assetName": "recovered-0013.png",
+    "blob": "ed81cf913650b7d67c7a1f43a16697cb2292dc4a.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.95,
+    "rationale": "The image shows a dog dressed as a wizard, casting a spell.",
+    "createdAt": "2026-02-09T06:02:29.087Z"
+  },
+  {
+    "assetId": "35f8e7ef-926d-4908-8180-907b58cca2bb",
+    "assetName": "recovered-0014.png",
+    "blob": "b4b2b3a79ea5883879f55cedfde5090b1972c5e7.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.99,
+    "rationale": "The image shows a dog dressed as a wizard, holding a magical orb.",
+    "createdAt": "2026-02-09T06:02:22.671Z"
+  },
+  {
+    "assetId": "890e2b5a-578c-4a79-a34a-69fa44bdb751",
+    "assetName": "recovered-0015.png",
+    "blob": "4677b515b532cbeb93537906822fb28bb5f841f1.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.95,
+    "rationale": "The image shows a dog dressed as a wizard, casting a spell.",
+    "createdAt": "2026-02-09T06:02:16.164Z"
+  },
+  {
+    "assetId": "6306680f-f167-470d-ba6a-35677166f9e7",
+    "assetName": "recovered-0016.png",
+    "blob": "1b20c8947477438457a77b318771b3a82962e013.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.95,
+    "rationale": "The image shows a dog dressed as a wizard, surrounded by magical elements.",
+    "createdAt": "2026-02-09T06:02:09.506Z"
+  },
+  {
+    "assetId": "380f851a-ed12-4d95-b3e1-46896bdd273f",
+    "assetName": "recovered-0017.png",
+    "blob": "16aa3f69931172472f2e30994bd239d145775bec.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.95,
+    "rationale": "The image depicts a dog dressed as a wizard, complete with a wizard hat, cape, staff, and magical ef"
+  },
+  {
+    "assetId": "a9674c48-764f-439f-9ba3-b39a2a7566bd",
+    "assetName": "recovered-0018.png",
+    "blob": "82729255f957de236ee3d0fcb17c303aec37eed9.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.95,
+    "rationale": "The image shows a wizard casting a spell, fitting the 'Wizardry' folder.",
+    "createdAt": "2026-02-09T06:01:28.682Z"
+  },
+  {
+    "assetId": "b45839fe-4b0c-40cf-8e94-50f5d6045a5a",
+    "assetName": "recovered-0019.png",
+    "blob": "6c3b2229565f03472cf2b39a39281f6bc6ab8087.png",
+    "suggestedFolder": "Wizardry",
+    "confidence": 0.99,
+    "rationale": "The image shows a wizard casting a spell, fitting the 'Wizardry' folder.",
+    "createdAt": "2026-02-09T06:01:22.482Z"
+  },
+  {
+    "assetId": "b2274722-6c40-4d57-a539-1b315a125e1a",
+    "assetName": "recovered-0020.png",
+    "blob": "6b9079b1c70f86cd79b9b6b26914310b1789fd2c.png",
+    "suggestedFolder": "Storms",
+    "confidence": 0.99,
+    "rationale": "The image shows a woman looking at a tornado, indicating a storm.",
+    "createdAt": "2026-02-09T05:59:21.121Z"
+  },
+  {
+    "assetId": "0977ac11-1e4a-46fb-8b6c-725171dc420a",
+    "assetName": "recovered-0021.png",
+    "blob": "ad1f7dce904b9e7286ae483dbfaf791311e22bad.png",
+    "suggestedFolder": "Storms",
+    "confidence": 0.95,
+    "rationale": "The image shows a woman looking at a tornado, indicating a storm.",
+    "createdAt": "2026-02-09T05:59:14.282Z"
+  },
+  {
+    "assetId": "972695a9-4bd2-47e3-bcf4-c96465ede19b",
+    "assetName": "recovered-0022.png",
+    "blob": "45673378aef4f9fa578d72c63502af2406d40b1f.png",
+    "suggestedFolder": "Storms",
+    "confidence": 0.99,
+    "rationale": "The image shows a large storm with a tornado and lightning strikes.",
+    "createdAt": "2026-02-09T05:59:08.047Z"
+  },
+  {
+    "assetId": "104f25fd-4eac-4e4f-88f1-da28619de64d",
+    "assetName": "recovered-0023.png",
+    "blob": "7b98358c9b81e509946860dd3c72b640b3fb8c6c.png",
+    "suggestedFolder": "Storms",
+    "confidence": 0.95,
+    "rationale": "The image shows a tornado and lightning, which are both storms.",
+    "createdAt": "2026-02-09T05:59:02.376Z"
+  },
+  {
+    "assetId": "b5d2bd41-4dd6-4443-be87-4f7cd3efb276",
+    "assetName": "recovered-0024.png",
+    "blob": "d0ea627b07c89f22e2221c1381d3bd0e5e422a2e.png",
+    "suggestedFolder": "Sad Girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a woman crying at a party, fitting the 'Sad Girls' theme.",
+    "createdAt": "2026-02-09T05:57:52.816Z"
+  },
+  {
+    "assetId": "a7b1fd97-62a1-4276-a99c-eece26ed8c60",
+    "assetName": "recovered-0025.png",
+    "blob": "325bd47ec673f85f983d90a41aaf7f4153829da8.png",
+    "suggestedFolder": "Sad Girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a woman crying at a party, fitting 'Sad Girls'.",
+    "createdAt": "2026-02-09T05:57:46.899Z"
+  },
+  {
+    "assetId": "877916c3-120b-46cb-96ad-54892bbd527c",
+    "assetName": "recovered-0026.png",
+    "blob": "88da9c8c61da7001d827569f1c8438aa4a06f072.png",
+    "suggestedFolder": "Sad Girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a sad woman at a party, fitting the folder name.",
+    "createdAt": "2026-02-09T05:56:58.877Z"
+  },
+  {
+    "assetId": "044873df-4892-4393-be6c-e864bb8dd740",
+    "assetName": "recovered-0027.png",
+    "blob": "65ace25e7c70e594fa3adb0adc0cf6331d8b822f.png",
+    "suggestedFolder": "Sad Girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a woman crying at a party, fitting the 'Sad Girls' theme.",
+    "createdAt": "2026-02-09T05:56:52.979Z"
+  },
+  {
+    "assetId": "dd23b50e-b8d1-41f9-80b9-0b70304b5426",
+    "assetName": "recovered-0028.png",
+    "blob": "02908721a1fe86ba1b17b556a469051b87678e57.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a man surrounded by women in a club setting.",
+    "createdAt": "2026-02-09T05:56:39.575Z"
+  },
+  {
+    "assetId": "8e63f7ca-e1f2-49ae-b78b-5f9fc56b2645",
+    "assetName": "recovered-0029.png",
+    "blob": "86cf3aac684e69604cb270ff70a84d5fae5483d3.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a man surrounded by smiling women in a party setting.",
+    "createdAt": "2026-02-09T05:56:28.013Z"
+  },
+  {
+    "assetId": "c14c26d5-3260-4ac9-a2cd-e98dde1579c2",
+    "assetName": "recovered-0030.png",
+    "blob": "ca08e7dfaf0e610bf03a57d1facd732c0b5e9547.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a man with two women, suggesting a fun or social theme.",
+    "createdAt": "2026-02-09T05:54:20.277Z"
+  },
+  {
+    "assetId": "f7e87833-1f79-4327-aca9-0b1745005601",
+    "assetName": "recovered-0031.png",
+    "blob": "ff19cefa80fcac2b8191fa2e1d3545a8e1b9fd5d.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a man with several women, suggesting a fun atmosphere.",
+    "createdAt": "2026-02-09T05:54:11.111Z"
+  },
+  {
+    "assetId": "f2ac5401-ae3d-4c8a-9234-abf3a320c211",
+    "assetName": "recovered-0032.png",
+    "blob": "cd2eec69cd6b1918e86a21c2d7e6b497898583f1.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image features a man in a flamboyant outfit with two women, suggesting a fun and celebratory atm"
+  },
+  {
+    "assetId": "184dc264-c9ee-4e97-bc94-9b48104765c0",
+    "assetName": "recovered-0033.png",
+    "blob": "ed3a5de44624c58fdc0d164c5b021b36a64b5a06.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a man with several women, suggesting a fun or party-like atmosphere.",
+    "createdAt": "2026-02-09T05:53:28.963Z"
+  },
+  {
+    "assetId": "21b0ee8e-37f4-4bca-9074-44eb82617321",
+    "assetName": "recovered-0034.png",
+    "blob": "39cf75f7216c3c52c549ebc4dcd002d5b85d7c33.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a group of young women enjoying themselves at an outdoor event, likely a music festi"
+  },
+  {
+    "assetId": "e7ccae84-17e6-4758-bd3d-8bbeb91cacf4",
+    "assetName": "recovered-0035.png",
+    "blob": "a621fc6932c6f20c2fb75a2fd1927ae6f21de846.png",
+    "suggestedFolder": "Fun girls",
+    "confidence": 0.95,
+    "rationale": "The image shows a group of women at a festival, having fun.",
+    "createdAt": "2026-02-09T05:50:48.257Z"
+  },
+  {
+    "assetId": "bbd11307-cca0-4332-8b1e-c70dfba2cb9b",
+    "assetName": "recovered-0036.png",
+    "blob": "645402db8175a59896458ea9ff37949f66a08e30.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 0.95,
+    "rationale": "The image shows multiple dogs at a party with cake and presents.",
+    "createdAt": "2026-02-09T05:50:24.557Z"
+  },
+  {
+    "assetId": "57f76cb1-22f2-4413-9b9b-715774f3755f",
+    "assetName": "recovered-0037.png",
+    "blob": "5a01dfa0d28c064accd0b2a9e3b55380767794a2.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 0.95,
+    "rationale": "The image features multiple dogs at a party with a cake. This makes 'Dogs' the most appropriate fold"
+  },
+  {
+    "assetId": "ecb65c68-e2e9-4b5b-89e6-32fa636c55a6",
+    "assetName": "recovered-0038.png",
+    "blob": "b78be17d50f7e7d916b3d2903d77deef6dfe0659.png",
+    "suggestedFolder": "Dogs",
+    "confidence": 1.0,
+    "rationale": "The image shows a golden retriever running in a field, so 'Dogs' is best.",
+    "createdAt": "2026-02-09T05:04:05.886Z"
+  }
+]

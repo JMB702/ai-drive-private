@@ -6,8 +6,12 @@ import { getActorId, requireWorkspaceMember } from "../../lib/auth.js";
 import { nowIso } from "../../lib/time.js";
 import { diagnoseGenerationFailure } from "../../lib/generation-failure.js";
 import { sanitizeInlinePreviewMetadata } from "../../lib/media-preview.js";
+import { TRACE_HEADER_NAME } from "../../lib/diagnostics/types.js";
 
 const MAX_LIST_TERMINAL_JOBS = 300;
+const FINALIZED_JOB_TTL_MS = 60 * 60 * 1000;
+const FINALIZED_JOB_MAX = 4_000;
+const FINALIZED_JOB_WARN_AT = 3_500;
 
 const generationRequestSchema = z.object({
   workspaceId: z.string(),
@@ -119,8 +123,87 @@ function nextFolderAssetName(app: FastifyInstance, folderId: string, extension: 
   return `${prefix}-${next}.${extension}`;
 }
 
+function requestTraceId(request: { headers: Record<string, unknown> }): string | null {
+  const candidate = request.headers[TRACE_HEADER_NAME];
+  if (typeof candidate === "string" && candidate.trim().length > 0) {
+    return candidate.trim().slice(0, 120);
+  }
+  if (Array.isArray(candidate)) {
+    const first = candidate.find((value) => typeof value === "string" && value.trim().length > 0);
+    if (typeof first === "string") return first.trim().slice(0, 120);
+  }
+  return null;
+}
+
 export async function registerGenerationRoutes(app: FastifyInstance): Promise<void> {
-  const finalizedJobs = new Set<string>();
+  const finalizedJobs = new Map<string, number>();
+  let lastFinalizedPressureWarning = 0;
+
+  function pruneFinalizedJobs(nowMs = Date.now()): void {
+    for (const [jobId, seenAt] of finalizedJobs) {
+      if (nowMs - seenAt <= FINALIZED_JOB_TTL_MS) continue;
+      finalizedJobs.delete(jobId);
+    }
+  }
+
+  function oldestFinalizedJobId(): string | null {
+    let oldestId: string | null = null;
+    let oldestSeenAt = Number.POSITIVE_INFINITY;
+    for (const [jobId, seenAt] of finalizedJobs) {
+      if (seenAt >= oldestSeenAt) continue;
+      oldestSeenAt = seenAt;
+      oldestId = jobId;
+    }
+    return oldestId;
+  }
+
+  function recordFinalizedJob(jobId: string, workspaceId: string): void {
+    const nowMs = Date.now();
+    pruneFinalizedJobs(nowMs);
+    finalizedJobs.set(jobId, nowMs);
+
+    if (finalizedJobs.size >= FINALIZED_JOB_WARN_AT && (nowMs - lastFinalizedPressureWarning) > 60_000) {
+      lastFinalizedPressureWarning = nowMs;
+      app.ctx.diagnostics.emit({
+        severity: "WARN",
+        category: "SYSTEM",
+        component: "generation.finalized_jobs",
+        eventName: "generation.finalized_jobs.memory_pressure",
+        message: "Finalized jobs cache is approaching memory cap",
+        workspaceId,
+        context: {
+          cacheSize: finalizedJobs.size,
+          warnThreshold: FINALIZED_JOB_WARN_AT,
+          max: FINALIZED_JOB_MAX,
+          ttlMs: FINALIZED_JOB_TTL_MS
+        }
+      });
+    }
+
+    let evicted = 0;
+    while (finalizedJobs.size > FINALIZED_JOB_MAX) {
+      const oldestId = oldestFinalizedJobId();
+      if (!oldestId) break;
+      finalizedJobs.delete(oldestId);
+      evicted += 1;
+    }
+    if (evicted > 0) {
+      app.ctx.diagnostics.emit({
+        severity: "HIGH",
+        category: "SYSTEM",
+        component: "generation.finalized_jobs",
+        eventName: "generation.finalized_jobs.evicted",
+        message: "Finalized jobs cache exceeded cap and evicted entries",
+        workspaceId,
+        context: {
+          cacheSize: finalizedJobs.size,
+          max: FINALIZED_JOB_MAX,
+          evicted,
+          ttlMs: FINALIZED_JOB_TTL_MS
+        }
+      });
+    }
+  }
 
   function finalizeJobOutcome(params: {
     jobId: string;
@@ -130,13 +213,14 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
     body: z.infer<typeof generationRequestSchema>;
   }): void {
     const { jobId, workspaceId, actorId, creditCost, body } = params;
+    pruneFinalizedJobs();
     if (finalizedJobs.has(jobId)) return;
 
     const job = app.ctx.store.generationJobs.find((item) => item.id === jobId);
     if (!job) return;
     if (job.status !== "SUCCEEDED" && job.status !== "FAILED") return;
 
-    finalizedJobs.add(jobId);
+    recordFinalizedJob(jobId, workspaceId);
 
     if (job.status === "SUCCEEDED" && job.result) {
       const actual = Math.max(1, Math.floor(creditCost * 0.9));
@@ -288,6 +372,10 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
   app.post("/v1/generation/jobs", async (request, reply) => {
     const body = generationRequestSchema.parse(request.body);
     const actor = requireWorkspaceMember(request, body.workspaceId);
+    const traceId = requestTraceId(request);
+    const requestSettings = traceId
+      ? { ...body.settings, __traceId: traceId }
+      : body.settings;
 
     if (!body.folderId && !body.assetId) {
       return reply.status(400).send({ error: "Generation requires a target folderId or assetId" });
@@ -310,7 +398,7 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
           negativePrompt: body.negativePrompt,
           model: body.model,
           type: body.type,
-          settings: body.settings
+          settings: requestSettings
         },
         reservedCredits: 0
       });
@@ -401,7 +489,7 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
         }
       }
 
-      app.ctx.runtime.jobSubscribers.forEach((subscriber) => subscriber(job));
+      app.ctx.runtime.notifyJobSubscribers(job, "generation.routes.blocked");
       return reply.code(202).send({ job });
     }
 
@@ -417,14 +505,14 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
         negativePrompt: body.negativePrompt,
         model: body.model,
         type: body.type,
-        settings: body.settings
+        settings: requestSettings
       },
       reservedCredits: creditCost
     });
 
     reserveCredits(app.ctx.store, body.workspaceId, job.id, creditCost);
     app.ctx.store.generationJobs.push(job);
-    app.ctx.runtime.jobSubscribers.forEach((subscriber) => subscriber(job));
+    app.ctx.runtime.notifyJobSubscribers(job, "generation.routes.created");
 
     // Completion handling must be event-driven, not timeout-based.
     const subscriber = (updated: GenerationJob) => {
@@ -538,7 +626,7 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
     }
 
     job.status = "CANCELED";
-    app.ctx.runtime.jobSubscribers.forEach((subscriber) => subscriber(job));
+    app.ctx.runtime.notifyJobSubscribers(job, "generation.routes.canceled");
     return { canceled: true, job };
   });
 

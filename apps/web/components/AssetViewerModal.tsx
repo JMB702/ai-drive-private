@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { downloadAssetFile, fallbackImagePreview, resolveAssetPreview, toDisplayPreviewUrl } from "../lib/projects";
 import { useProjects } from "./ProjectsProvider";
@@ -119,6 +119,10 @@ export function AssetViewerModal() {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [viewerUrlIndex, setViewerUrlIndex] = useState(0);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const [infoCollapsed, setInfoCollapsed] = useState(false);
+  const [imageHovered, setImageHovered] = useState(false);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const stageFrameRef = useRef<HTMLDivElement | null>(null);
 
   if (!selectedAsset) return null;
   const activeAsset = selectedAsset;
@@ -245,27 +249,64 @@ export function AssetViewerModal() {
     }
   }
 
+  function updateImageHoverFromPointer(clientX: number, clientY: number): void {
+    const image = imageRef.current;
+    const frame = stageFrameRef.current;
+    if (!image) {
+      setImageHovered(false);
+      return;
+    }
+    const rect = image.getBoundingClientRect();
+    const frameRect = frame?.getBoundingClientRect();
+    // Keep nav available outside narrow/vertical images by expanding hover zone into side gutters.
+    const sideGutter = frameRect ? Math.max(0, (frameRect.width - rect.width) / 2) : 0;
+    const horizontalBuffer = Math.max(56, sideGutter + 18);
+    const verticalBuffer = 24;
+    const withinHorizontal = clientX >= rect.left - horizontalBuffer && clientX <= rect.right + horizontalBuffer;
+    const withinVertical = clientY >= rect.top - verticalBuffer && clientY <= rect.bottom + verticalBuffer;
+    setImageHovered(withinHorizontal && withinVertical);
+  }
+
   const modal = (
     <div className="asset-modal-backdrop" onClick={closeAsset}>
-      <div className="asset-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="asset-close" onClick={closeAsset}>×</button>
-
-        <div className="asset-stage">
+      <div className={`asset-modal ${infoCollapsed ? "info-collapsed" : ""}`} onClick={closeAsset}>
+        <div className="asset-modal-controls">
           <button
-            className={`asset-nav asset-nav-left ${prevAsset ? "" : "disabled"}`}
+            className="asset-modal-action info"
             type="button"
+            aria-label={infoCollapsed ? "Show information panel" : "Dismiss information panel"}
             onClick={(event) => {
               event.stopPropagation();
-              openPrevious();
+              setInfoCollapsed((value) => !value);
             }}
-            aria-label="Previous image"
-            disabled={!prevAsset}
           >
-            ‹
+            <span className="asset-modal-action-glyph">{infoCollapsed ? "↤" : "↦"}</span>
+            <span className="asset-modal-action-text">{infoCollapsed ? "Show Info" : "Dismiss Info"}</span>
           </button>
+          <button
+            className="asset-modal-action close"
+            type="button"
+            aria-label="Close image viewer"
+            onClick={(event) => {
+              event.stopPropagation();
+              closeAsset();
+            }}
+          >
+            <span className="asset-modal-action-glyph">×</span>
+            <span className="asset-modal-action-text">Close</span>
+          </button>
+        </div>
 
-          <div className="asset-stage-frame">
+        <div className="asset-stage">
+          <div
+            ref={stageFrameRef}
+            className="asset-stage-frame"
+            onMouseMove={(event) => updateImageHoverFromPointer(event.clientX, event.clientY)}
+            onMouseEnter={(event) => updateImageHoverFromPointer(event.clientX, event.clientY)}
+            onMouseLeave={() => setImageHovered(false)}
+          >
             <img
+              ref={imageRef}
               key={latestViewerUrl}
               src={latestViewerUrl}
               alt={activeAsset.name}
@@ -278,6 +319,7 @@ export function AssetViewerModal() {
                 objectFit: "contain",
                 objectPosition: "center"
               }}
+              onClick={(event) => event.stopPropagation()}
               onError={(event) => {
                 const element = event.currentTarget;
                 const nextIndex = viewerUrlIndex + 1;
@@ -288,23 +330,40 @@ export function AssetViewerModal() {
                 element.src = fallbackImagePreview(activeAsset.id);
               }}
             />
-          </div>
 
-          <button
-            className={`asset-nav asset-nav-right ${nextAsset ? "" : "disabled"}`}
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              openNext();
-            }}
-            aria-label="Next image"
-            disabled={!nextAsset}
-          >
-            ›
-          </button>
+            {prevAsset ? (
+              <button
+                className={`asset-nav asset-nav-left ${imageHovered ? "visible" : ""}`}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openPrevious();
+                }}
+                aria-label="Previous image"
+                onMouseEnter={() => setImageHovered(true)}
+              >
+                ‹
+              </button>
+            ) : null}
+
+            {nextAsset ? (
+              <button
+                className={`asset-nav asset-nav-right ${imageHovered ? "visible" : ""}`}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openNext();
+                }}
+                aria-label="Next image"
+                onMouseEnter={() => setImageHovered(true)}
+              >
+                ›
+              </button>
+            ) : null}
+          </div>
         </div>
 
-        <aside className="asset-side">
+        <aside className={`asset-side ${infoCollapsed ? "collapsed" : ""}`} onClick={(event) => event.stopPropagation()}>
           <div className="asset-side-head">
             <strong>{selectedAsset.name}</strong>
             <p className="muted">Author</p>

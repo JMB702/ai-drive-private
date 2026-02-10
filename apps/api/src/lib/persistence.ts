@@ -8,6 +8,28 @@ import { resolveApiDataPath } from "./data-paths.js";
 const STORE_FILE_NAME = "api-store.json";
 const MAX_PERSISTED_TERMINAL_JOBS = 600;
 
+export type PersistenceDiagnosticEvent = {
+  eventName: string;
+  message: string;
+  context?: Record<string, string | number | boolean | null>;
+};
+
+type PersistenceDiagnosticHook = ((event: PersistenceDiagnosticEvent) => void) | null;
+
+let persistenceDiagnosticHook: PersistenceDiagnosticHook = null;
+
+function emitPersistenceDiagnostic(event: PersistenceDiagnosticEvent): void {
+  try {
+    persistenceDiagnosticHook?.(event);
+  } catch {
+    // Persistence operations must stay best-effort.
+  }
+}
+
+export function setPersistenceDiagnosticsHook(hook: PersistenceDiagnosticHook): void {
+  persistenceDiagnosticHook = hook;
+}
+
 function legacyCandidateStorePaths(cwd: string): string[] {
   return [
     path.join(cwd, ".data", STORE_FILE_NAME),
@@ -63,10 +85,22 @@ function compactStore(store: InMemoryStore): void {
   if (terminal.length <= MAX_PERSISTED_TERMINAL_JOBS) return;
 
   const keepTerminalIds = new Set(terminal.slice(0, MAX_PERSISTED_TERMINAL_JOBS).map((job) => job.id));
+  const previousCount = store.generationJobs.length;
   store.generationJobs = store.generationJobs.filter((job) => {
     if (job.status === "QUEUED" || job.status === "RUNNING") return true;
     return keepTerminalIds.has(job.id);
   });
+  const removed = Math.max(0, previousCount - store.generationJobs.length);
+  if (removed > 0) {
+    emitPersistenceDiagnostic({
+      eventName: "persistence.compaction.pruned_terminal_jobs",
+      message: "Persisted store terminal jobs were compacted",
+      context: {
+        removed,
+        retainedTerminal: keepTerminalIds.size
+      }
+    });
+  }
 }
 
 function storeRecordCount(store: InMemoryStore): number {
@@ -90,6 +124,13 @@ function loadStoreCandidate(filePath: string): { store: InMemoryStore; sourcePat
       mtimeMs: stat.mtimeMs
     };
   } catch {
+    emitPersistenceDiagnostic({
+      eventName: "persistence.load.parse_error",
+      message: "Persisted store could not be parsed",
+      context: {
+        sourcePath: filePath
+      }
+    });
     return null;
   }
 }

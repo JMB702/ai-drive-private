@@ -34,6 +34,40 @@ afterAll(async () => {
 });
 
 describe("api route integration", () => {
+  it("returns mobile profile defaults for mobile user agents", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/ui/profile",
+      headers: {
+        "x-user-id": "user_demo",
+        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"
+      }
+    });
+
+    expect(res.statusCode).toBe(200);
+    const payload = res.json();
+    expect(payload.profile.surface).toBe("mobile");
+    expect(payload.profile.generatePanel.toolsDefaultCollapsed).toBe(true);
+    expect(payload.profile.referenceImages.maxPerImageDataUrlBytes).toBeLessThan(1_900_000);
+  });
+
+  it("uses explicit surface overrides for ui profile", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/ui/profile?surface=desktop",
+      headers: {
+        "x-user-id": "user_demo",
+        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"
+      }
+    });
+
+    expect(res.statusCode).toBe(200);
+    const payload = res.json();
+    expect(payload.profile.surface).toBe("desktop");
+    expect(payload.profile.generatePanel.toolsDefaultCollapsed).toBe(false);
+    expect(payload.profile.referenceImages.safeGenerationBodyBytes).toBe(7 * 1024 * 1024);
+  });
+
   it("creates folder and asset", async () => {
     const folderRes = await app.inject({
       method: "POST",

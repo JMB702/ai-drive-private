@@ -8,6 +8,54 @@ const PREVIEW_BLOB_DIR_NAME = "previews";
 
 export type PreviewMetadata = Record<string, string | number | boolean | null | undefined>;
 
+export type PreviewDiagnosticEvent = {
+  eventName: string;
+  message: string;
+  context?: Record<string, string | number | boolean | null>;
+};
+
+type PreviewDiagnosticHook = ((event: PreviewDiagnosticEvent) => void) | null;
+
+let previewDiagnosticHook: PreviewDiagnosticHook = null;
+
+function emitPreviewDiagnostic(event: PreviewDiagnosticEvent): void {
+  try {
+    previewDiagnosticHook?.(event);
+  } catch {
+    // Preview handling should never fail because diagnostics failed.
+  }
+}
+
+export function setMediaPreviewDiagnosticsHook(hook: PreviewDiagnosticHook): void {
+  previewDiagnosticHook = hook;
+}
+
+function metadataString(metadata: PreviewMetadata, key: string): string | null {
+  const value = metadata[key];
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  return value.trim().slice(0, 160);
+}
+
+function previewDiagnosticContext(
+  metadata: PreviewMetadata,
+  extra: Record<string, string | number | boolean | null> = {}
+): Record<string, string | number | boolean | null> {
+  const aspectRatio = metadataString(metadata, "aspectRatio");
+  const resolution = metadataString(metadata, "resolution");
+  const model = metadataString(metadata, "model");
+  const generationJobId = metadataString(metadata, "generationJobId");
+  const workspaceId = metadataString(metadata, "workspaceId");
+  const context: Record<string, string | number | boolean | null> = {
+    ...extra
+  };
+  if (aspectRatio) context.aspectRatio = aspectRatio;
+  if (resolution) context.resolution = resolution;
+  if (model) context.model = model;
+  if (generationJobId) context.generationJobId = generationJobId;
+  if (workspaceId) context.workspaceId = workspaceId;
+  return context;
+}
+
 function isDataImageUrl(value: string): boolean {
   return value.startsWith("data:image/");
 }
@@ -248,6 +296,14 @@ export function sanitizeInlinePreviewMetadata<T extends PreviewMetadata>(metadat
         mutable.inlinePreviewDropped = true;
         mutable.inlinePreviewLength = previewDataUrl.length;
         delete mutable.previewDataUrl;
+        emitPreviewDiagnostic({
+          eventName: "preview.inline.compacted",
+          message: "Large inline preview was removed because persistence failed",
+          context: previewDiagnosticContext(mutable, {
+            inlinePreviewLength: previewDataUrl.length,
+            persistableLimit: MAX_INLINE_PREVIEW_DATA_URL_CHARS
+          })
+        });
         if (typeof mutable.previewUrl !== "string" || mutable.previewUrl.length === 0) {
           if (typeof mutable.outputUrl === "string" && mutable.outputUrl.length > 0) {
             mutable.previewUrl = mutable.outputUrl;
@@ -269,7 +325,17 @@ export function sanitizeInlinePreviewMetadata<T extends PreviewMetadata>(metadat
       if (typeof mutable.previewDataUrl === "string" && !isPersistableInlinePreviewDataUrl(mutable.previewDataUrl)) {
         mutable.inlinePreviewDropped = true;
         mutable.inlinePreviewLength = mutable.previewDataUrl.length;
+        const droppedLength = mutable.previewDataUrl.length;
         delete mutable.previewDataUrl;
+        emitPreviewDiagnostic({
+          eventName: "preview.inline.compacted",
+          message: "Oversized SVG inline preview was compacted",
+          context: previewDiagnosticContext(mutable, {
+            inlinePreviewLength: droppedLength,
+            persistableLimit: MAX_INLINE_PREVIEW_DATA_URL_CHARS,
+            embeddedRasterExternalized: mutable.inlinePreviewEmbeddedImage === true
+          })
+        });
       }
     }
   }
@@ -283,6 +349,13 @@ export function sanitizeInlinePreviewMetadata<T extends PreviewMetadata>(metadat
     delete mutable.outputUrl;
     mutable.previewDataUrl = suppressedPreviewDataUrl(mutable, "Remote preview source disabled");
     mutable.remotePreviewSuppressed = true;
+    emitPreviewDiagnostic({
+      eventName: "preview.remote.suppressed",
+      message: "Remote preview source was suppressed and replaced with local placeholder",
+      context: previewDiagnosticContext(mutable, {
+        source: "pollinations"
+      })
+    });
   }
 
   if (
@@ -292,6 +365,13 @@ export function sanitizeInlinePreviewMetadata<T extends PreviewMetadata>(metadat
     (typeof mutable.previewBlob !== "string" || !normalizePreviewBlobKey(mutable.previewBlob))
   ) {
     mutable.previewDataUrl = suppressedPreviewDataUrl(mutable, "Inline preview compacted");
+    emitPreviewDiagnostic({
+      eventName: "preview.placeholder.generated",
+      message: "Preview metadata had no usable preview source and was replaced with placeholder",
+      context: previewDiagnosticContext(mutable, {
+        reason: "missing_preview_source"
+      })
+    });
   }
 
   return metadata;

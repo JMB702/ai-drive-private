@@ -35,4 +35,5 @@ export interface InMemoryStore {
 
 export interface RuntimeEvents {
   jobSubscribers: Set<(job: GenerationJob) => void>;
+  notifyJobSubscribers: (job: GenerationJob, source: string) => void;
 }

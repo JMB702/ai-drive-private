@@ -1,6 +1,141 @@
 import { nanoid } from "nanoid";
-import type { GenerationRequest, GenerationResult, ProviderAdapter } from "@aidrive/shared";
+import type {
+  DiagnosticSeverity,
+  GenerationRequest,
+  GenerationResult,
+  ProviderAdapter
+} from "@aidrive/shared";
 import type { Env } from "../config/env.js";
+
+const PROVIDER_REQUEST_TIMEOUT_MS = Math.max(2_000, Number(process.env.AIDRIVE_PROVIDER_TIMEOUT_MS ?? 45_000));
+const PROVIDER_RETRY_ATTEMPTS = Math.max(1, Number(process.env.AIDRIVE_PROVIDER_RETRY_ATTEMPTS ?? 2));
+
+type ProviderDiagnosticInput = {
+  severity: DiagnosticSeverity;
+  eventName: string;
+  message: string;
+  workspaceId: string;
+  traceId?: string | null;
+  context?: Record<string, unknown>;
+};
+
+type ProviderDiagnosticSink = ((input: ProviderDiagnosticInput) => void) | null;
+
+let providerDiagnosticSink: ProviderDiagnosticSink = null;
+
+export function configureProviderDiagnostics(sink: ProviderDiagnosticSink): void {
+  providerDiagnosticSink = sink;
+}
+
+function emitProviderDiagnostic(input: ProviderDiagnosticInput): void {
+  try {
+    providerDiagnosticSink?.(input);
+  } catch {
+    // Provider requests should not fail due to telemetry.
+  }
+}
+
+function traceIdForRequest(request: GenerationRequest): string | null {
+  const candidate = request.settings?.__traceId;
+  if (typeof candidate !== "string" || candidate.trim().length === 0) return null;
+  return candidate.trim().slice(0, 120);
+}
+
+function truncateErrorDetail(value: string, max = 280): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, Math.max(0, max - 1))}…`;
+}
+
+type FetchEnvelopeParams = {
+  url: string;
+  init: RequestInit;
+  timeoutMs: number;
+  maxAttempts: number;
+  provider: string;
+  model: string;
+  workspaceId: string;
+  traceId: string | null;
+  route: string;
+};
+
+type FetchEnvelopeResult = {
+  response: Response;
+  attempt: number;
+  latencyMs: number;
+};
+
+async function fetchWithEnvelope(params: FetchEnvelopeParams): Promise<FetchEnvelopeResult> {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= params.maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), params.timeoutMs);
+    const startedAt = Date.now();
+
+    try {
+      const response = await fetch(params.url, {
+        ...params.init,
+        signal: controller.signal
+      });
+      const latencyMs = Date.now() - startedAt;
+      const shouldRetry = response.status >= 500 && attempt < params.maxAttempts;
+      if (shouldRetry) {
+        emitProviderDiagnostic({
+          severity: "WARN",
+          eventName: "provider.retry.server_error",
+          message: "Provider returned server error; retrying",
+          workspaceId: params.workspaceId,
+          traceId: params.traceId,
+          context: {
+            provider: params.provider,
+            model: params.model,
+            route: params.route,
+            statusCode: response.status,
+            latencyMs,
+            attempt,
+            maxAttempts: params.maxAttempts,
+            retryOutcome: "retrying"
+          }
+        });
+        continue;
+      }
+      return { response, attempt, latencyMs };
+    } catch (error) {
+      const latencyMs = Date.now() - startedAt;
+      lastError = error;
+      const timedOut = error instanceof Error && error.name === "AbortError";
+      const isFinalAttempt = attempt >= params.maxAttempts;
+      emitProviderDiagnostic({
+        severity: timedOut ? "WARN" : "HIGH",
+        eventName: timedOut ? "provider.timeout" : "provider.network_error",
+        message: timedOut ? "Provider request timed out" : "Provider request failed with network error",
+        workspaceId: params.workspaceId,
+        traceId: params.traceId,
+        context: {
+          provider: params.provider,
+          model: params.model,
+          route: params.route,
+          latencyMs,
+          attempt,
+          maxAttempts: params.maxAttempts,
+          retryOutcome: isFinalAttempt ? "exhausted" : "retrying",
+          error: error instanceof Error ? truncateErrorDetail(error.message) : truncateErrorDetail(String(error))
+        }
+      });
+      if (isFinalAttempt) {
+        if (timedOut) {
+          throw new Error(`Provider request timed out after ${params.timeoutMs}ms (attempt ${attempt}/${params.maxAttempts})`);
+        }
+        throw error;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw (lastError instanceof Error ? lastError : new Error("Provider request failed"));
+}
 
 function normalizedAspectRatio(aspectRatio: string | undefined): string {
   return /^\d+:\d+$/.test(aspectRatio ?? "") ? String(aspectRatio) : "1:1";
@@ -186,17 +321,46 @@ async function generateGeminiImageDataUrl(apiKey: string, request: GenerationReq
   const capabilities = geminiImageModelCapabilities[modelName];
   const prompt = `${request.prompt}\n\nGenerate a photorealistic image. Aspect ratio: ${aspectRatio}.`;
   const referenceParts = extractReferenceImageParts(request.settings);
+  const traceId = traceIdForRequest(request);
 
   async function submit(body: unknown): Promise<string> {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
+    const { response, attempt, latencyMs } = await fetchWithEnvelope({
+      url: endpoint,
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      },
+      timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+      maxAttempts: PROVIDER_RETRY_ATTEMPTS,
+      provider: "gemini",
+      model: modelName,
+      workspaceId: request.workspaceId,
+      traceId,
+      route: "/v1beta/models/:model:generateContent"
     });
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Gemini image request failed: ${response.status} ${text}`);
+      emitProviderDiagnostic({
+        severity: response.status >= 500 ? "HIGH" : "WARN",
+        eventName: "provider.http_error",
+        message: "Gemini image request failed",
+        workspaceId: request.workspaceId,
+        traceId,
+        context: {
+          provider: "gemini",
+          model: modelName,
+          route: "/v1beta/models/:model:generateContent",
+          attempt,
+          maxAttempts: PROVIDER_RETRY_ATTEMPTS,
+          latencyMs,
+          statusCode: response.status,
+          errorCode: `http_${response.status}`,
+          upstreamMessage: truncateErrorDetail(text)
+        }
+      });
+      throw new Error(`Gemini image request failed: ${response.status} ${truncateErrorDetail(text)}`);
     }
 
     const payload = (await response.json()) as {
@@ -308,6 +472,7 @@ class GeminiAdapter implements ProviderAdapter {
       const requestedAspectRatio = normalizedAspectRatio(
         typeof request.settings.aspectRatio === "string" ? request.settings.aspectRatio : "1:1"
       );
+      const imageModelName = imageModelForRequest(request);
       const needsStrictRatio = requestedAspectRatio !== "1:1";
       const attempts = needsStrictRatio ? 3 : 1;
 
@@ -333,11 +498,41 @@ class GeminiAdapter implements ProviderAdapter {
 
       if (!previewDataUrl) {
         const detail = lastGeminiError ? ` Gemini: ${lastGeminiError}` : "";
+        emitProviderDiagnostic({
+          severity: "HIGH",
+          eventName: "provider.generation_failed",
+          message: "Gemini could not produce an image preview",
+          workspaceId: request.workspaceId,
+          traceId: traceIdForRequest(request),
+          context: {
+            provider: "gemini",
+            model: imageModelName,
+            route: "/v1beta/models/:model:generateContent",
+            errorCode: "generation_failed",
+            attempts,
+            ratioRequested: requestedAspectRatio,
+            lastError: lastGeminiError ? truncateErrorDetail(lastGeminiError) : null
+          }
+        });
         throw new Error(`Could not produce requested aspect ratio (${requestedAspectRatio}).${detail}`);
       }
       if (needsStrictRatio && !isSvgDataUrl(previewDataUrl) && !isAspectRatioSatisfied(requestedAspectRatio, previewDataUrl)) {
         previewDataUrl = wrapImageInAspectRatio(previewDataUrl, requestedAspectRatio);
         ratioMismatch = true;
+        emitProviderDiagnostic({
+          severity: "WARN",
+          eventName: "provider.aspect_ratio_fallback",
+          message: "Gemini image ratio mismatch was corrected by SVG wrapper",
+          workspaceId: request.workspaceId,
+          traceId: traceIdForRequest(request),
+          context: {
+            provider: "gemini",
+            model: imageModelName,
+            route: "/v1beta/models/:model:generateContent",
+            requestedAspectRatio,
+            fallback: "svg_wrapper"
+          }
+        });
       }
 
       return {
@@ -361,20 +556,49 @@ class GeminiAdapter implements ProviderAdapter {
     }
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`;
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: request.prompt }] }],
-        generationConfig: {
-          temperature: 0.7
-        }
-      })
+    const traceId = traceIdForRequest(request);
+    const { response, attempt, latencyMs } = await fetchWithEnvelope({
+      url: endpoint,
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: request.prompt }] }],
+          generationConfig: {
+            temperature: 0.7
+          }
+        })
+      },
+      timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+      maxAttempts: PROVIDER_RETRY_ATTEMPTS,
+      provider: "gemini",
+      model: "gemini-2.0-flash",
+      workspaceId: request.workspaceId,
+      traceId,
+      route: "/v1beta/models/gemini-2.0-flash:generateContent"
     });
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Gemini request failed: ${response.status} ${text}`);
+      emitProviderDiagnostic({
+        severity: response.status >= 500 ? "HIGH" : "WARN",
+        eventName: "provider.http_error",
+        message: "Gemini text request failed",
+        workspaceId: request.workspaceId,
+        traceId,
+        context: {
+          provider: "gemini",
+          model: "gemini-2.0-flash",
+          route: "/v1beta/models/gemini-2.0-flash:generateContent",
+          attempt,
+          maxAttempts: PROVIDER_RETRY_ATTEMPTS,
+          latencyMs,
+          statusCode: response.status,
+          errorCode: `http_${response.status}`,
+          upstreamMessage: truncateErrorDetail(text)
+        }
+      });
+      throw new Error(`Gemini request failed: ${response.status} ${truncateErrorDetail(text)}`);
     }
 
     const payload = (await response.json()) as {

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { createTraceId, postClientDiagnostic } from "../lib/diagnostics-client";
 
 export default function GlobalError({
   error,
@@ -12,6 +13,21 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error(error);
+    const traceId = createTraceId();
+    void postClientDiagnostic({
+      severity: "HIGH",
+      category: "CLIENT",
+      component: "web.global_error_boundary",
+      eventName: "client.global_error",
+      message: error.message || "Unhandled app error",
+      workspaceId: "ws_demo",
+      traceId,
+      context: {
+        digest: error.digest ?? null,
+        route: typeof window !== "undefined" ? window.location.pathname : null,
+        stack: error.stack ?? null
+      }
+    });
   }, [error]);
 
   return (

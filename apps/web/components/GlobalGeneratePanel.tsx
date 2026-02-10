@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, type DragEvent as ReactDragEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest } from "../lib/api";
+import { createTraceId, postClientDiagnostic } from "../lib/diagnostics-client";
 import {
   GENERATION_CLIENT_REQUEST_ID_KEY,
   toDisplayPreviewUrl,
@@ -32,6 +33,19 @@ type DropPayload = {
   textPlain: string;
   textHtml: string;
 };
+type UiSurface = "mobile" | "desktop";
+type UiProfile = {
+  surface: UiSurface;
+  viewportBreakpointPx: number;
+  generatePanel: {
+    toolsDefaultCollapsed: boolean;
+  };
+  referenceImages: {
+    maxPerImageDataUrlBytes: number;
+    maxTotalDataUrlBytes: number;
+    safeGenerationBodyBytes: number;
+  };
+};
 
 const PROMPT_BY_PROJECT_STORAGE_KEY = "aidrive:generatePromptByProject";
 const REFS_BY_PROJECT_STORAGE_KEY = "aidrive:generateRefsByProject";
@@ -44,6 +58,18 @@ const MAX_REFERENCE_IMAGE_DATA_URL_BYTES = 1_900_000;
 const MAX_REFERENCE_TOTAL_DATA_URL_BYTES = 5_200_000;
 const SAFE_GENERATION_BODY_BYTES = 7 * 1024 * 1024;
 const SUBMIT_REFERENCE_TARGET_BYTES = [1_600_000, 1_200_000, 900_000, 700_000, 500_000, 360_000];
+const DEFAULT_UI_PROFILE: UiProfile = {
+  surface: "desktop",
+  viewportBreakpointPx: 980,
+  generatePanel: {
+    toolsDefaultCollapsed: false
+  },
+  referenceImages: {
+    maxPerImageDataUrlBytes: MAX_REFERENCE_IMAGE_DATA_URL_BYTES,
+    maxTotalDataUrlBytes: MAX_REFERENCE_TOTAL_DATA_URL_BYTES,
+    safeGenerationBodyBytes: SAFE_GENERATION_BODY_BYTES
+  }
+};
 
 const MODEL_OPTIONS: Array<{
   key: ModelKey;
@@ -96,6 +122,54 @@ function createClientRequestId(): string {
   return `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function positiveInteger(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return fallback;
+  return Math.round(value);
+}
+
+function normalizeUiProfile(value: unknown): UiProfile | null {
+  if (!value || typeof value !== "object") return null;
+  const profile = value as Partial<UiProfile>;
+  const surface = profile.surface === "mobile" || profile.surface === "desktop" ? profile.surface : DEFAULT_UI_PROFILE.surface;
+  const viewportBreakpointPx = positiveInteger(profile.viewportBreakpointPx, DEFAULT_UI_PROFILE.viewportBreakpointPx);
+  const toolsDefaultCollapsed = Boolean(profile.generatePanel?.toolsDefaultCollapsed);
+  const maxPerImageDataUrlBytes = positiveInteger(
+    profile.referenceImages?.maxPerImageDataUrlBytes,
+    DEFAULT_UI_PROFILE.referenceImages.maxPerImageDataUrlBytes
+  );
+  const maxTotalDataUrlBytes = positiveInteger(
+    profile.referenceImages?.maxTotalDataUrlBytes,
+    DEFAULT_UI_PROFILE.referenceImages.maxTotalDataUrlBytes
+  );
+  const safeGenerationBodyBytes = positiveInteger(
+    profile.referenceImages?.safeGenerationBodyBytes,
+    DEFAULT_UI_PROFILE.referenceImages.safeGenerationBodyBytes
+  );
+  return {
+    surface,
+    viewportBreakpointPx,
+    generatePanel: {
+      toolsDefaultCollapsed
+    },
+    referenceImages: {
+      maxPerImageDataUrlBytes,
+      maxTotalDataUrlBytes,
+      safeGenerationBodyBytes
+    }
+  };
+}
+
+async function fetchUiProfile(): Promise<UiProfile> {
+  try {
+    const response = await apiRequest<{ profile?: unknown }>("/v1/ui/profile");
+    const profile = normalizeUiProfile(response.profile);
+    if (profile) return profile;
+  } catch {
+    // Use safe fallback profile.
+  }
+  return DEFAULT_UI_PROFILE;
+}
+
 function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
@@ -111,8 +185,8 @@ function totalReferenceDataUrlBytes(images: ReferenceImage[]): number {
   return images.reduce((total, image) => total + referenceDataUrlBytes(image.dataUrl), 0);
 }
 
-function referenceSizeLimitMessage(): string {
-  return `Reference images are too large. Keep each under ${formatMegabytes(MAX_REFERENCE_IMAGE_DATA_URL_BYTES)} and total references under ${formatMegabytes(MAX_REFERENCE_TOTAL_DATA_URL_BYTES)}.`;
+function referenceSizeLimitMessage(maxPerImageBytes: number, maxTotalBytes: number): string {
+  return `Reference images are too large. Keep each under ${formatMegabytes(maxPerImageBytes)} and total references under ${formatMegabytes(maxTotalBytes)}.`;
 }
 
 async function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement | null> {
@@ -172,16 +246,23 @@ async function compressImageDataUrlToLimit(dataUrl: string, maxBytes: number): P
   }
 }
 
-async function fitReferenceImageToBudget(dataUrl: string, remainingTotalBytes: number): Promise<string | null> {
+async function fitReferenceImageToBudget(
+  dataUrl: string,
+  remainingTotalBytes: number,
+  maxPerImageBytes: number
+): Promise<string | null> {
   const initialBytes = referenceDataUrlBytes(dataUrl);
   if (initialBytes <= 0) return null;
-  const maxBytesForImage = Math.min(MAX_REFERENCE_IMAGE_DATA_URL_BYTES, Math.max(0, remainingTotalBytes));
+  const maxBytesForImage = Math.min(maxPerImageBytes, Math.max(0, remainingTotalBytes));
   if (maxBytesForImage <= 0) return null;
   if (initialBytes <= maxBytesForImage) return dataUrl;
   return await compressImageDataUrlToLimit(dataUrl, maxBytesForImage);
 }
 
-async function selectSubmitReferenceImages(images: ReferenceImage[]): Promise<{
+async function selectSubmitReferenceImages(
+  images: ReferenceImage[],
+  limits: { maxPerImageDataUrlBytes: number; maxTotalDataUrlBytes: number }
+): Promise<{
   accepted: ReferenceImage[];
   droppedInvalid: number;
   droppedOversize: number;
@@ -198,8 +279,8 @@ async function selectSubmitReferenceImages(images: ReferenceImage[]): Promise<{
       continue;
     }
     let submitDataUrl = image.dataUrl;
-    if (initialBytes > MAX_REFERENCE_IMAGE_DATA_URL_BYTES) {
-      const compressed = await compressImageDataUrlToLimit(image.dataUrl, MAX_REFERENCE_IMAGE_DATA_URL_BYTES);
+    if (initialBytes > limits.maxPerImageDataUrlBytes) {
+      const compressed = await compressImageDataUrlToLimit(image.dataUrl, limits.maxPerImageDataUrlBytes);
       if (!compressed) {
         droppedOversize += 1;
         continue;
@@ -207,7 +288,7 @@ async function selectSubmitReferenceImages(images: ReferenceImage[]): Promise<{
       submitDataUrl = compressed;
     }
     const bytes = referenceDataUrlBytes(submitDataUrl);
-    if (totalBytes + bytes > MAX_REFERENCE_TOTAL_DATA_URL_BYTES) {
+    if (totalBytes + bytes > limits.maxTotalDataUrlBytes) {
       droppedOversize += 1;
       continue;
     }
@@ -566,6 +647,7 @@ export function GlobalGeneratePanel() {
   const [keyboardPressingGenerate, setKeyboardPressingGenerate] = useState(false);
   const [toolsCollapsed, setToolsCollapsed] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [uiProfile, setUiProfile] = useState<UiProfile>(DEFAULT_UI_PROFILE);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const referencePickerRef = useRef<HTMLInputElement | null>(null);
   const projectMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -593,6 +675,20 @@ export function GlobalGeneratePanel() {
     () => folders.find((folder) => folder.id === selectedProjectId)?.name ?? null,
     [folders, selectedProjectId]
   );
+  const referenceBudget = useMemo(() => ({
+    maxPerImageDataUrlBytes: positiveInteger(
+      uiProfile.referenceImages.maxPerImageDataUrlBytes,
+      MAX_REFERENCE_IMAGE_DATA_URL_BYTES
+    ),
+    maxTotalDataUrlBytes: positiveInteger(
+      uiProfile.referenceImages.maxTotalDataUrlBytes,
+      MAX_REFERENCE_TOTAL_DATA_URL_BYTES
+    ),
+    safeGenerationBodyBytes: positiveInteger(
+      uiProfile.referenceImages.safeGenerationBodyBytes,
+      SAFE_GENERATION_BODY_BYTES
+    )
+  }), [uiProfile.referenceImages.maxPerImageDataUrlBytes, uiProfile.referenceImages.maxTotalDataUrlBytes, uiProfile.referenceImages.safeGenerationBodyBytes]);
   const collapsedToolsSummary = useMemo(() => {
     const modelsSummary = selectedModels.length > 0
       ? selectedModels
@@ -614,16 +710,20 @@ export function GlobalGeneratePanel() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let cancelled = false;
     promptByProjectRef.current = readPromptByProject();
     refsByProjectRef.current = readRefsByProjectFromLocalStorage();
     settingsByProjectRef.current = readSettingsByProject();
-    const mobileViewport = window.matchMedia("(max-width: 980px)").matches;
+    const mobileViewport = window.matchMedia(`(max-width: ${DEFAULT_UI_PROFILE.viewportBreakpointPx}px)`).matches;
     setIsMobileViewport(mobileViewport);
+    let storedToolsCollapsed: "1" | "0" | null = null;
     try {
       const stored = window.localStorage.getItem(TOOLS_COLLAPSED_STORAGE_KEY);
       if (stored === "1") {
+        storedToolsCollapsed = "1";
         setToolsCollapsed(true);
       } else if (stored === "0") {
+        storedToolsCollapsed = "0";
         setToolsCollapsed(false);
       } else {
         setToolsCollapsed(mobileViewport);
@@ -631,12 +731,25 @@ export function GlobalGeneratePanel() {
     } catch {
       setToolsCollapsed(mobileViewport);
     }
+    void (async () => {
+      const profile = await fetchUiProfile();
+      if (cancelled) return;
+      setUiProfile(profile);
+      const profileViewport = window.matchMedia(`(max-width: ${profile.viewportBreakpointPx}px)`).matches;
+      setIsMobileViewport(profileViewport);
+      if (!storedToolsCollapsed) {
+        setToolsCollapsed(profile.generatePanel.toolsDefaultCollapsed);
+      }
+    })();
     setPromptLoaded(true);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const mediaQuery = window.matchMedia("(max-width: 980px)");
+    const mediaQuery = window.matchMedia(`(max-width: ${uiProfile.viewportBreakpointPx}px)`);
     const syncViewport = (event?: MediaQueryListEvent) => {
       setIsMobileViewport(event ? event.matches : mediaQuery.matches);
     };
@@ -647,7 +760,7 @@ export function GlobalGeneratePanel() {
     }
     mediaQuery.addListener(syncViewport);
     return () => mediaQuery.removeListener(syncViewport);
-  }, []);
+  }, [uiProfile.viewportBreakpointPx]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -890,7 +1003,11 @@ export function GlobalGeneratePanel() {
         skippedCapacity += 1;
         continue;
       }
-      const fitted = await fitReferenceImageToBudget(candidate.dataUrl, MAX_REFERENCE_TOTAL_DATA_URL_BYTES - totalBytes);
+      const fitted = await fitReferenceImageToBudget(
+        candidate.dataUrl,
+        referenceBudget.maxTotalDataUrlBytes - totalBytes,
+        referenceBudget.maxPerImageDataUrlBytes
+      );
       if (!fitted) {
         const candidateBytes = referenceDataUrlBytes(candidate.dataUrl);
         if (candidateBytes <= 0) {
@@ -901,7 +1018,7 @@ export function GlobalGeneratePanel() {
         continue;
       }
       const fittedBytes = referenceDataUrlBytes(fitted);
-      if (fittedBytes <= 0 || totalBytes + fittedBytes > MAX_REFERENCE_TOTAL_DATA_URL_BYTES) {
+      if (fittedBytes <= 0 || totalBytes + fittedBytes > referenceBudget.maxTotalDataUrlBytes) {
         skippedSize += 1;
         continue;
       }
@@ -921,7 +1038,10 @@ export function GlobalGeneratePanel() {
         return;
       }
       if (skippedSize > 0) {
-        setPanelState((state) => ({ ...state, error: referenceSizeLimitMessage() }));
+        setPanelState((state) => ({
+          ...state,
+          error: referenceSizeLimitMessage(referenceBudget.maxPerImageDataUrlBytes, referenceBudget.maxTotalDataUrlBytes)
+        }));
         return;
       }
       if (skippedInvalid > 0) {
@@ -935,7 +1055,9 @@ export function GlobalGeneratePanel() {
     const skippedTotal = skippedInvalid + skippedSize + skippedCapacity;
     if (skippedTotal > 0) {
       const reasons: string[] = [];
-      if (skippedSize > 0) reasons.push(referenceSizeLimitMessage());
+      if (skippedSize > 0) {
+        reasons.push(referenceSizeLimitMessage(referenceBudget.maxPerImageDataUrlBytes, referenceBudget.maxTotalDataUrlBytes));
+      }
       if (skippedInvalid > 0) reasons.push("Invalid image format.");
       if (skippedCapacity > 0) reasons.push(`Max ${maxReferenceImages} references.`);
       setPanelState((state) => ({
@@ -1012,8 +1134,10 @@ export function GlobalGeneratePanel() {
 
   function onChooseModel(value: ModelKey): void {
     setModelKey(value);
-    // Dropdown selection should switch active model; prior behavior appended and triggered duplicate submits.
-    setSelectedModelKeys([value]);
+    setSelectedModelKeys((prev) => {
+      if (prev.includes(value)) return prev;
+      return [...prev, value];
+    });
     setModelConfigs((prev) => {
       if (prev[value]) return prev;
       const found = MODEL_OPTIONS.find((item) => item.key === value);
@@ -1049,7 +1173,7 @@ export function GlobalGeneratePanel() {
     try {
       const loaded = await Promise.all(
         chosen.map(async (file) => {
-          let dataUrl = await compressImageBlobToLimit(file, MAX_REFERENCE_IMAGE_DATA_URL_BYTES);
+          let dataUrl = await compressImageBlobToLimit(file, referenceBudget.maxPerImageDataUrlBytes);
           if (!dataUrl) {
             dataUrl = await new Promise<string>((resolve, reject) => {
               const reader = new FileReader();
@@ -1108,8 +1232,37 @@ export function GlobalGeneratePanel() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit || !panelState.targetProjectId) return;
+    if (suppressProjectScopedPersistRef.current) return;
     if (submitInFlightRef.current) return;
     submitInFlightRef.current = true;
+    const activeProjectId = panelState.targetProjectId;
+    const activeProjectRefs = refsByProjectRef.current[activeProjectId] ?? [];
+    const submitSourceReferences = suppressProjectScopedPersistRef.current
+      ? activeProjectRefs
+      : referenceImagesRef.current;
+    const submitTraceId = createTraceId();
+    const emitSubmitDiagnostic = (
+      eventName: string,
+      severity: "WARN" | "HIGH",
+      message: string,
+      context: Record<string, unknown>
+    ): void => {
+      void postClientDiagnostic({
+        severity,
+        category: "GENERATION",
+        component: "web.generate_panel",
+        eventName,
+        message,
+        workspaceId: "ws_demo",
+        traceId: submitTraceId,
+        context: {
+          projectId: activeProjectId,
+          model: modelKey,
+          requestedCount: modelConfigs[modelKey]?.count ?? 1,
+          ...context
+        }
+      });
+    };
 
     try {
       let failureCount = 0;
@@ -1122,14 +1275,26 @@ export function GlobalGeneratePanel() {
         resolution: selected.resolutions[0]
       };
       const submitNotes: string[] = [];
-      const submitReferences = await selectSubmitReferenceImages(referenceImages);
+      const submitReferences = await selectSubmitReferenceImages(submitSourceReferences, referenceBudget);
       let referencesForSubmit = submitReferences.accepted;
-      if (submitReferences.accepted.length !== referenceImages.length) {
+      if (submitReferences.accepted.length !== submitSourceReferences.length) {
         const droppedCount = submitReferences.droppedInvalid + submitReferences.droppedOversize;
         const droppedReason = submitReferences.droppedOversize > 0
-          ? referenceSizeLimitMessage()
+          ? referenceSizeLimitMessage(referenceBudget.maxPerImageDataUrlBytes, referenceBudget.maxTotalDataUrlBytes)
           : "One or more references had an invalid image format.";
         submitNotes.push(`${droppedCount} reference image${droppedCount === 1 ? "" : "s"} were removed. ${droppedReason}`);
+        emitSubmitDiagnostic(
+          "generation.submit.references_filtered",
+          "WARN",
+          "Reference images were removed before submit",
+          {
+            droppedCount,
+            droppedInvalid: submitReferences.droppedInvalid,
+            droppedOversize: submitReferences.droppedOversize,
+            acceptedCount: submitReferences.accepted.length,
+            requestedCount: submitSourceReferences.length
+          }
+        );
       }
       const payloadEstimateBase: GenerationJob["request"] = {
         folderId: panelState.targetProjectId,
@@ -1146,7 +1311,7 @@ export function GlobalGeneratePanel() {
       const referencesBeforeBudget = referencesForSubmit;
       const budgetedReferences = await shrinkReferencesForPayloadBudget({
         images: referencesForSubmit,
-        maxBodyBytes: SAFE_GENERATION_BODY_BYTES,
+        maxBodyBytes: referenceBudget.safeGenerationBodyBytes,
         estimateBodyBytes: (images) =>
           estimateGenerationBodyBytes({
             ...payloadEstimateBase,
@@ -1158,15 +1323,44 @@ export function GlobalGeneratePanel() {
         budgetedReferences.references.some((item, index) => item.dataUrl !== referencesBeforeBudget[index]?.dataUrl);
       referencesForSubmit = budgetedReferences.references;
       if (budgetedReferences.compressedCount > 0) {
-        submitNotes.push(`Compressed ${budgetedReferences.compressedCount} reference image${budgetedReferences.compressedCount === 1 ? "" : "s"} for mobile upload.`);
+        submitNotes.push(`Compressed ${budgetedReferences.compressedCount} reference image${budgetedReferences.compressedCount === 1 ? "" : "s"} to fit request limits.`);
+        emitSubmitDiagnostic(
+          "generation.submit.references_compressed",
+          "WARN",
+          "Reference images were compressed for request size budget",
+          {
+            compressedCount: budgetedReferences.compressedCount,
+            remainingReferences: budgetedReferences.references.length
+          }
+        );
       }
       if (budgetedReferences.droppedCount > 0) {
         submitNotes.push(`Removed ${budgetedReferences.droppedCount} additional reference image${budgetedReferences.droppedCount === 1 ? "" : "s"} to fit request size.`);
+        emitSubmitDiagnostic(
+          "generation.submit.references_dropped_for_budget",
+          "WARN",
+          "Reference images were dropped to satisfy request size budget",
+          {
+            droppedCount: budgetedReferences.droppedCount,
+            remainingReferences: budgetedReferences.references.length
+          }
+        );
       }
-      if (submitReferences.accepted.length !== referenceImages.length || referencesChangedByBudget) {
+      if (submitReferences.accepted.length !== submitSourceReferences.length || referencesChangedByBudget) {
         setReferenceImages(referencesForSubmit);
+        referenceImagesRef.current = referencesForSubmit;
       }
-      if (budgetedReferences.estimatedBodyBytes > SAFE_GENERATION_BODY_BYTES) {
+      if (budgetedReferences.estimatedBodyBytes > referenceBudget.safeGenerationBodyBytes) {
+        emitSubmitDiagnostic(
+          "generation.submit.payload_too_large",
+          "HIGH",
+          "Generation submit blocked because payload remained too large",
+          {
+            estimatedBodyBytes: budgetedReferences.estimatedBodyBytes,
+            maxBodyBytes: referenceBudget.safeGenerationBodyBytes,
+            referencesRemaining: referencesForSubmit.length
+          }
+        );
         setPanelState((prev) => ({
           ...prev,
           error: `Request is still too large (${formatMegabytes(budgetedReferences.estimatedBodyBytes)}). Shorten the prompt or remove references.`
@@ -1187,7 +1381,7 @@ export function GlobalGeneratePanel() {
           [GENERATION_CLIENT_REQUEST_ID_KEY]: clientRequestId
         };
         const payload: GenerationJob["request"] = {
-          folderId: panelState.targetProjectId,
+          folderId: activeProjectId,
           prompt: panelState.prompt.trim(),
           model: selected.apiModel,
           type: panelState.type,
@@ -1243,6 +1437,17 @@ export function GlobalGeneratePanel() {
           .map((reason) => (reason instanceof Error ? reason.message : String(reason)));
         const firstReason = failedReasons[0]?.trim();
         const friendlyReason = parseApiErrorMessage(firstReason) ?? firstReason;
+        emitSubmitDiagnostic(
+          "generation.submit.failed",
+          "HIGH",
+          "One or more generation submit requests failed",
+          {
+            failureCount,
+            requestCount: requests.length,
+            fallbackWithoutReferencesCount,
+            firstError: friendlyReason ?? null
+          }
+        );
         const targetFolder = folders.find((folder) => folder.id === panelState.targetProjectId);
         pushNotification({
           kind: "SUBMIT_FAILED",
@@ -1250,7 +1455,7 @@ export function GlobalGeneratePanel() {
           message: friendlyReason
             ? `${friendlyReason}${targetFolder ? ` (${targetFolder.name})` : ""}`
             : `Submission failed${targetFolder ? ` in ${targetFolder.name}` : ""}.`,
-          folderId: panelState.targetProjectId,
+          folderId: activeProjectId,
           jobId: null
         });
         setPanelState((prev) => ({
@@ -1260,6 +1465,15 @@ export function GlobalGeneratePanel() {
             : `${failureCount} generation request${failureCount > 1 ? "s" : ""} failed to submit.`
         }));
       } else if (fallbackWithoutReferencesCount > 0) {
+        emitSubmitDiagnostic(
+          "generation.submit.fallback_without_references",
+          "WARN",
+          "Generation submit retried without references due payload limits",
+          {
+            fallbackWithoutReferencesCount,
+            requestCount: requests.length
+          }
+        );
         setPanelState((prev) => ({
           ...prev,
           error: `${fallbackWithoutReferencesCount} request${fallbackWithoutReferencesCount > 1 ? "s were" : " was"} submitted without references to fit upload limits.`
@@ -1340,7 +1554,9 @@ export function GlobalGeneratePanel() {
           />
         </div>
 
-        <div className={`dock-tools ${toolsPanelCollapsed ? "collapsed" : "expanded"} ${toolsCanCollapse ? "mobile-collapsible" : "desktop-static"}`}>
+        <div
+          className={`dock-tools ${toolsPanelCollapsed ? "collapsed" : "expanded"} ${toolsCanCollapse ? "mobile-collapsible dock-tools-mobile" : "desktop-static dock-tools-desktop"}`}
+        >
           {toolsCanCollapse ? (
             <button
               className={`dock-tools-surface ${toolsPanelCollapsed ? "collapsed" : "expanded"}`}

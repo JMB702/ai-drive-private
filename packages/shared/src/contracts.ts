@@ -215,3 +215,55 @@ export interface AuditEvent {
   metadata: Record<string, string | number | boolean | null>;
   createdAt: string;
 }
+
+export type DiagnosticSeverity = "INFO" | "WARN" | "HIGH" | "CRITICAL";
+
+export type DiagnosticCategory =
+  | "GENERATION"
+  | "PROVIDER"
+  | "PROXY"
+  | "PERSISTENCE"
+  | "REALTIME"
+  | "CLIENT"
+  | "SUPERVISOR"
+  | "IMAGE_PROXY"
+  | "SYSTEM";
+
+export type IncidentStatus = "OPEN" | "ACKED" | "RESOLVED";
+
+export type CauseStatus = "KNOWN" | "UNKNOWN";
+
+export interface DiagnosticEvent {
+  id: string;
+  ts: string;
+  severity: DiagnosticSeverity;
+  category: DiagnosticCategory;
+  component: string;
+  eventName: string;
+  message: string;
+  workspaceId: string | null;
+  requestId: string | null;
+  traceId: string | null;
+  fingerprint: string;
+  context: Record<string, string | number | boolean | null>;
+}
+
+export interface DiagnosticIncident {
+  id: string;
+  fingerprint: string;
+  status: IncidentStatus;
+  severity: DiagnosticSeverity;
+  causeStatus: CauseStatus;
+  title: string;
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+  latestEventId: string;
+}
+
+export interface DiagnosticIncidentPrompts {
+  hotspots: string[];
+  triage: string;
+  fix: string;
+  verify: string;
+}

@@ -22,5 +22,10 @@ export function createStore(): InMemoryStore {
 }
 
 export function createRuntimeEvents(): RuntimeEvents {
-  return { jobSubscribers: new Set() };
+  return {
+    jobSubscribers: new Set(),
+    notifyJobSubscribers: () => {
+      // Runtime notifier is wired by createContext.
+    }
+  };
 }

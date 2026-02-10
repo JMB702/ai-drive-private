@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Component } from "react";
+import { createTraceId, postClientDiagnostic } from "../lib/diagnostics-client";
 
 type Props = {
   children: ReactNode;
@@ -30,9 +31,26 @@ export class ClientErrorBoundary extends Component<Props, State> {
     window.sessionStorage.removeItem("aidrive:autoReloadedAfterChunkError");
   }
 
-  componentDidCatch(error: unknown): void {
+  componentDidCatch(error: unknown, errorInfo: { componentStack?: string }): void {
     console.error("Client render crash:", error);
     const message = error instanceof Error ? error.message : String(error ?? "");
+    const traceId = createTraceId();
+    void postClientDiagnostic({
+      severity: "HIGH",
+      category: "CLIENT",
+      component: "web.client_error_boundary",
+      eventName: "client.render_crash",
+      message: message || "Client render crash",
+      workspaceId: "ws_demo",
+      traceId,
+      context: {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: message || "Unknown render error",
+        stack: error instanceof Error ? error.stack ?? null : null,
+        componentStack: errorInfo.componentStack ?? null,
+        route: typeof window !== "undefined" ? window.location.pathname : null
+      }
+    });
     if (typeof window === "undefined") return;
     const chunkLikeError =
       /loading chunk/i.test(message) ||

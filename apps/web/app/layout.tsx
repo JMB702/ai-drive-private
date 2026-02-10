@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
-import type { Viewport } from "next";
+import type { Metadata, Viewport } from "next";
 import { AppShell } from "../components/AppShell";
 import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "AI Drive"
+};
 
 export const viewport: Viewport = {
   width: "device-width",

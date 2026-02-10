@@ -4,6 +4,8 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useProjects } from "./ProjectsProvider";
 import { toDisplayPreviewUrl } from "../lib/projects";
+import { apiRequest } from "../lib/api";
+import { postClientDiagnostic } from "../lib/diagnostics-client";
 import {
   copyGenerationFailureReport,
   generationFailureCategoryLabel,
@@ -11,6 +13,15 @@ import {
 } from "../lib/generation-failure";
 
 const NOTIFICATIONS_STORAGE_KEY = "aidrive:notifications";
+
+type IncidentPromptKind = "triage" | "fix" | "verify";
+type IncidentDiagnosticTool = "incident_packet" | "triage_prompt" | "fix_prompt" | "verify_prompt";
+
+type IncidentPromptsPayload = {
+  triage: string;
+  fix: string;
+  verify: string;
+};
 
 function formatRelativeTime(iso: string): string {
   const deltaMs = Date.now() - Date.parse(iso);
@@ -52,6 +63,35 @@ function stringifyUnknown(value: unknown): string {
   }
 }
 
+function normalizeIncidentPrompts(input: unknown): IncidentPromptsPayload | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Partial<IncidentPromptsPayload>;
+  const triage = typeof raw.triage === "string" ? raw.triage.trim() : "";
+  const fix = typeof raw.fix === "string" ? raw.fix.trim() : "";
+  const verify = typeof raw.verify === "string" ? raw.verify.trim() : "";
+  if (!triage || !fix || !verify) return null;
+  return { triage, fix, verify };
+}
+
+function incidentPromptLabel(kind: IncidentPromptKind): string {
+  if (kind === "triage") return "Triage";
+  if (kind === "fix") return "Fix";
+  return "Verify";
+}
+
+function incidentPromptTool(kind: IncidentPromptKind): IncidentDiagnosticTool {
+  if (kind === "triage") return "triage_prompt";
+  if (kind === "fix") return "fix_prompt";
+  return "verify_prompt";
+}
+
+function incidentToolLabel(tool: IncidentDiagnosticTool): string {
+  if (tool === "incident_packet") return "Incident packet";
+  if (tool === "triage_prompt") return "Triage prompt";
+  if (tool === "fix_prompt") return "Fix prompt";
+  return "Verify prompt";
+}
+
 export function NotificationCenter() {
   const {
     notifications,
@@ -78,6 +118,8 @@ export function NotificationCenter() {
   const [bellRinging, setBellRinging] = useState(false);
   const [animatingNotificationIds, setAnimatingNotificationIds] = useState<Set<string>>(new Set());
   const [removingNotificationIds, setRemovingNotificationIds] = useState<Set<string>>(new Set());
+  const incidentPromptsCacheRef = useRef<Map<string, IncidentPromptsPayload>>(new Map());
+  const [lastCopiedToolByIncident, setLastCopiedToolByIncident] = useState<Record<string, IncidentDiagnosticTool>>({});
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const hasPrimedNotificationsRef = useRef(false);
@@ -200,6 +242,151 @@ export function NotificationCenter() {
     onOpenNotification(notificationId);
   }
 
+  function showCopyFeedback(message: string): void {
+    setCopyFeedback(message);
+    window.setTimeout(() => setCopyFeedback(null), 2200);
+  }
+
+  function rememberCopiedTool(incidentId: string, tool: IncidentDiagnosticTool): void {
+    setLastCopiedToolByIncident((prev) => {
+      if (prev[incidentId] === tool) return prev;
+      return { ...prev, [incidentId]: tool };
+    });
+  }
+
+  function emitIncidentToolUsage(
+    incidentId: string,
+    tool: IncidentDiagnosticTool,
+    outcome: "success" | "error"
+  ): void {
+    void postClientDiagnostic({
+      severity: outcome === "success" ? "INFO" : "WARN",
+      category: "CLIENT",
+      component: "web.notification_center",
+      eventName: "diagnostics.tool.used",
+      message: outcome === "success"
+        ? `Operator used ${incidentToolLabel(tool)}`
+        : `Operator attempted ${incidentToolLabel(tool)} but copy failed`,
+      workspaceId: "ws_demo",
+      context: {
+        incidentId,
+        tool,
+        outcome,
+        source: "notification_center"
+      }
+    });
+  }
+
+  function emitIncidentToolFeedback(
+    incidentId: string,
+    tool: IncidentDiagnosticTool,
+    helpful: boolean,
+    improvementSuggestion: string | null
+  ): void {
+    void postClientDiagnostic({
+      severity: helpful ? "INFO" : "WARN",
+      category: "CLIENT",
+      component: "web.notification_center",
+      eventName: "diagnostics.tool.feedback",
+      message: helpful
+        ? `Operator marked ${incidentToolLabel(tool)} as helpful`
+        : `Operator marked ${incidentToolLabel(tool)} as needing improvement`,
+      workspaceId: "ws_demo",
+      context: {
+        incidentId,
+        tool,
+        helpful,
+        improvementSuggestion: improvementSuggestion ?? null,
+        source: "notification_center"
+      }
+    });
+  }
+
+  async function loadIncidentPrompts(incidentId: string): Promise<IncidentPromptsPayload | null> {
+    const cached = incidentPromptsCacheRef.current.get(incidentId);
+    if (cached) return cached;
+    const response = await apiRequest<{ prompts?: unknown }>(
+      `/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/prompts`
+    );
+    const prompts = normalizeIncidentPrompts(response.prompts);
+    if (!prompts) return null;
+    incidentPromptsCacheRef.current.set(incidentId, prompts);
+    return prompts;
+  }
+
+  async function copyIncidentPacket(notificationId: string, incidentId: string): Promise<void> {
+    try {
+      const response = await apiRequest<{ packet?: string }>(
+        `/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/packet`
+      );
+      const packet = typeof response.packet === "string" ? response.packet : "";
+      if (!packet) {
+        showCopyFeedback("Incident packet was empty.");
+        return;
+      }
+      await navigator.clipboard.writeText(packet);
+      markNotificationRead(notificationId);
+      rememberCopiedTool(incidentId, "incident_packet");
+      emitIncidentToolUsage(incidentId, "incident_packet", "success");
+      showCopyFeedback("Incident packet copied for Codex.");
+    } catch {
+      emitIncidentToolUsage(incidentId, "incident_packet", "error");
+      showCopyFeedback("Could not copy incident packet.");
+    }
+  }
+
+  async function copyIncidentPrompt(
+    notificationId: string,
+    incidentId: string,
+    kind: IncidentPromptKind
+  ): Promise<void> {
+    const tool = incidentPromptTool(kind);
+    try {
+      const prompts = await loadIncidentPrompts(incidentId);
+      if (!prompts) {
+        emitIncidentToolUsage(incidentId, tool, "error");
+        showCopyFeedback("Incident prompts were unavailable.");
+        return;
+      }
+      const prompt = prompts[kind];
+      if (!prompt) {
+        emitIncidentToolUsage(incidentId, tool, "error");
+        showCopyFeedback(`${incidentPromptLabel(kind)} prompt was empty.`);
+        return;
+      }
+      await navigator.clipboard.writeText(prompt);
+      markNotificationRead(notificationId);
+      rememberCopiedTool(incidentId, tool);
+      emitIncidentToolUsage(incidentId, tool, "success");
+      showCopyFeedback(`${incidentPromptLabel(kind)} prompt copied for Codex.`);
+    } catch {
+      emitIncidentToolUsage(incidentId, tool, "error");
+      showCopyFeedback(`Could not copy ${incidentPromptLabel(kind).toLowerCase()} prompt.`);
+    }
+  }
+
+  function submitIncidentToolFeedback(notificationId: string, incidentId: string, helpful: boolean): void {
+    const tool = lastCopiedToolByIncident[incidentId];
+    if (!tool) {
+      showCopyFeedback("Copy a packet or prompt first so feedback can be tied to a tool.");
+      return;
+    }
+    let improvementSuggestion: string | null = null;
+    if (!helpful) {
+      const response = window.prompt("How could this tool be improved? (Optional)");
+      if (response === null) return;
+      const normalized = response.trim();
+      improvementSuggestion = normalized.length > 0 ? normalized.slice(0, 280) : null;
+    }
+    markNotificationRead(notificationId);
+    emitIncidentToolFeedback(incidentId, tool, helpful, improvementSuggestion);
+    if (helpful) {
+      showCopyFeedback(`${incidentToolLabel(tool)} marked helpful.`);
+      return;
+    }
+    showCopyFeedback("Improvement feedback saved.");
+  }
+
   function iconForNotification(kind: string, previewUrl?: string | null): ReactNode {
     const normalized = previewUrl ? toDisplayPreviewUrl(previewUrl) : null;
     if (normalized) {
@@ -207,6 +394,7 @@ export function NotificationCenter() {
     }
     if (kind === "GENERATION_SUCCEEDED") return <span aria-hidden="true">🖼️</span>;
     if (kind === "GENERATION_FAILED") return <span aria-hidden="true">⚠️</span>;
+    if (kind === "SYSTEM_INCIDENT") return <span aria-hidden="true">🛠️</span>;
     return <span aria-hidden="true">🔔</span>;
   }
 
@@ -303,6 +491,7 @@ export function NotificationCenter() {
                 const isGenerationSuccess = notification.kind === "GENERATION_SUCCEEDED";
                 const isUnread = !notification.read;
                 const isFailureNotification = notification.kind === "GENERATION_FAILED" || notification.kind === "SUBMIT_FAILED";
+                const isSystemIncident = notification.kind === "SYSTEM_INCIDENT";
                 const model = job?.request.model ?? null;
                 const aspectRatio = typeof job?.request.settings.aspectRatio === "string" ? job.request.settings.aspectRatio : null;
                 const resolution = typeof job?.request.settings.resolution === "string" ? job.request.settings.resolution : null;
@@ -343,6 +532,75 @@ export function NotificationCenter() {
                         ) : (
                           <p>{notification.message}</p>
                         )}
+                        {isSystemIncident ? (
+                          <small className="muted">
+                            Severity: {notification.severity ?? "WARN"} · Cause: {notification.causeStatus ?? "UNKNOWN"}
+                          </small>
+                        ) : null}
+                        {isSystemIncident && notification.incidentId ? (
+                          <div className="notification-diagnostics-actions">
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={async (event) => {
+                                event.stopPropagation();
+                                await copyIncidentPacket(notification.id, notification.incidentId ?? "");
+                              }}
+                            >
+                              Copy incident packet
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={async (event) => {
+                                event.stopPropagation();
+                                await copyIncidentPrompt(notification.id, notification.incidentId ?? "", "triage");
+                              }}
+                            >
+                              Copy triage prompt
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={async (event) => {
+                                event.stopPropagation();
+                                await copyIncidentPrompt(notification.id, notification.incidentId ?? "", "fix");
+                              }}
+                            >
+                              Copy fix prompt
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={async (event) => {
+                                event.stopPropagation();
+                                await copyIncidentPrompt(notification.id, notification.incidentId ?? "", "verify");
+                              }}
+                            >
+                              Copy verify prompt
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                submitIncidentToolFeedback(notification.id, notification.incidentId ?? "", true);
+                              }}
+                            >
+                              Helpful
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                submitIncidentToolFeedback(notification.id, notification.incidentId ?? "", false);
+                              }}
+                            >
+                              Needs improvement
+                            </button>
+                          </div>
+                        ) : null}
                         {isGenerationSuccess ? (
                           <small className="muted">Completed: {formatCompletedTime(notification.createdAt)}</small>
                         ) : null}

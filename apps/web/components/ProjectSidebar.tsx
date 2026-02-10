@@ -35,7 +35,9 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [thumbnailPrefs, setThumbnailPrefs] = useState<Record<string, ProjectThumbnailPreference>>({});
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
   const [thumbLoadStateByFolderId, setThumbLoadStateByFolderId] = useState<Record<string, { src: string; loaded: boolean }>>({});
+  const [sidebarLiftPx, setSidebarLiftPx] = useState(0);
   const sidebarCardRef = useRef<HTMLDivElement | null>(null);
+  const projectsListRef = useRef<HTMLDivElement | null>(null);
   const PROJECT_EDITOR_EVENT = "aidrive:open-project-editor";
   const PROJECT_EDITOR_STORAGE_KEY = "aidrive:openProjectEditorId";
 
@@ -83,36 +85,6 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
       return next;
     });
   }, [sidebarFolders]);
-
-  useEffect(() => {
-    const node = sidebarCardRef.current;
-    if (!node) return;
-
-    const onWheel = (event: WheelEvent) => {
-      if (!node.contains(event.target as Node)) return;
-      const maxTop = node.scrollHeight - node.clientHeight;
-      if (maxTop <= 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-
-      let deltaY = event.deltaY;
-      if (event.deltaMode === 1) deltaY *= 16;
-      if (event.deltaMode === 2) deltaY *= node.clientHeight;
-
-      const nextTop = Math.max(0, Math.min(maxTop, node.scrollTop + deltaY));
-      const changed = Math.abs(nextTop - node.scrollTop) > 0.5;
-      node.scrollTop = nextTop;
-      if (changed || Math.abs(deltaY) > 0.01) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-
-    node.addEventListener("wheel", onWheel, { passive: false });
-    return () => node.removeEventListener("wheel", onWheel);
-  }, []);
 
   function parseAspectRatio(value: string | undefined): number {
     if (!value) return 1;
@@ -179,8 +151,72 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
   }
 
+  function normalizeWheelDelta(event: React.WheelEvent<HTMLElement>, fallbackHeight: number): number {
+    let deltaY = event.deltaY;
+    if (event.deltaMode === 1) deltaY *= 16;
+    if (event.deltaMode === 2) deltaY *= fallbackHeight;
+    return deltaY;
+  }
+
+  function maxSidebarLiftPx(currentLift: number): number {
+    if (typeof window === "undefined") return 0;
+    const card = sidebarCardRef.current;
+    if (!card) return 0;
+    const dock = document.querySelector(".generate-dock-wrap") as HTMLElement | null;
+    if (!dock) return 0;
+    const cardRect = card.getBoundingClientRect();
+    const dockRect = dock.getBoundingClientRect();
+    const desiredBottom = dockRect.top - 12;
+    const cardBottomWithoutLift = cardRect.bottom + currentLift;
+    return Math.max(0, cardBottomWithoutLift - desiredBottom);
+  }
+
+  function remainingSidebarLiftPx(currentLift: number): number {
+    return Math.max(0, maxSidebarLiftPx(currentLift) - currentLift);
+  }
+
+  function handleProjectsWheel(event: React.WheelEvent<HTMLDivElement>): void {
+    const list = projectsListRef.current;
+    if (!list) return;
+    const deltaY = normalizeWheelDelta(event, list.clientHeight || 1);
+    if (Math.abs(deltaY) <= 0.01) return;
+
+    const atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
+    const atTop = list.scrollTop <= 1;
+
+    if (deltaY > 0 && atBottom) {
+      const remaining = remainingSidebarLiftPx(sidebarLiftPx);
+      if (remaining > 0.5) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSidebarLiftPx((current) => current + Math.min(deltaY, remainingSidebarLiftPx(current)));
+      }
+      return;
+    }
+
+    if (deltaY < 0 && atTop && sidebarLiftPx > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSidebarLiftPx((current) => Math.max(0, current + deltaY));
+    }
+  }
+
+  useEffect(() => {
+    const clampLiftToCurrentLimit = () => {
+      setSidebarLiftPx((current) => {
+        const maxLift = maxSidebarLiftPx(current);
+        return Math.max(0, Math.min(current, maxLift));
+      });
+    };
+
+    clampLiftToCurrentLimit();
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", clampLiftToCurrentLimit);
+    return () => window.removeEventListener("resize", clampLiftToCurrentLimit);
+  }, []);
+
   return (
-    <div className="sidebar-card" ref={sidebarCardRef}>
+    <div className="sidebar-card" ref={sidebarCardRef} style={{ transform: sidebarLiftPx > 0 ? `translateY(-${sidebarLiftPx}px)` : undefined }}>
       <div className="sidebar-brand">
         <span className="brand-dot" aria-hidden="true" />
         <div>
@@ -210,12 +246,12 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
           <strong>Projects</strong>
           <button className="chip-btn" onClick={() => setCreateModalOpen(true)}>+ New</button>
         </div>
-
-        {sidebarFolders.length === 0 ? (
-          <p className="muted">No projects yet.</p>
-        ) : (
-          sidebarFolders.map((folder) => (
-            <div
+        <div className="sidebar-projects-list" ref={projectsListRef} onWheel={handleProjectsWheel}>
+          {sidebarFolders.length === 0 ? (
+            <p className="muted">No projects yet.</p>
+          ) : (
+            sidebarFolders.map((folder) => (
+              <div
               key={folder.id}
               onClick={() => openProject(folder.id)}
               onKeyDown={(event) => {
@@ -341,9 +377,10 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
                   ✎
                 </button>
               </span>
-            </div>
-          ))
-        )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

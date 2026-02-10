@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest } from "../lib/api";
+import { postClientDiagnostic } from "../lib/diagnostics-client";
 import {
   AUTO_SEED_SAMPLE_PROJECTS,
   SAMPLE_PROJECT_NAMES,
@@ -40,15 +41,22 @@ type ReorderInput = {
   targetIndex: number;
 };
 
+type SystemIncidentSeverity = "INFO" | "WARN" | "HIGH" | "CRITICAL";
+type SystemCauseStatus = "KNOWN" | "UNKNOWN";
+type SystemIncidentStatus = "OPEN" | "ACKED" | "RESOLVED";
+
 export type AppNotification = {
   id: string;
-  kind: "SUBMIT_FAILED" | "GENERATION_SUCCEEDED" | "GENERATION_FAILED";
+  kind: "SUBMIT_FAILED" | "GENERATION_SUCCEEDED" | "GENERATION_FAILED" | "SYSTEM_INCIDENT";
   title: string;
   message: string;
   typeLabel?: string | null;
   imageName?: string | null;
   imageAssetId?: string | null;
   imagePreviewUrl?: string | null;
+  incidentId?: string | null;
+  severity?: SystemIncidentSeverity | null;
+  causeStatus?: SystemCauseStatus | null;
   createdAt: string;
   read: boolean;
   folderId: string | null;
@@ -128,6 +136,9 @@ const NOTIFICATIONS_STORAGE_KEY = "aidrive:notifications";
 const NOTIFICATION_MAX_COUNT = 100;
 const NOTIFICATION_TTL_MS = 60 * 24 * 60 * 60 * 1000;
 const PERSISTED_NOTIFICATION_PREVIEW_MAX_CHARS = 2048;
+const NOTIFIED_INCIDENT_IDS_STORAGE_KEY = "aidrive:notifiedIncidentIds";
+const INCIDENT_POLL_INTERVAL_MS = 20_000;
+const INCIDENT_REPEAT_THRESHOLD_COUNT = 3;
 
 function arraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
@@ -251,6 +262,49 @@ function normalizeGenerationJob(item: unknown): GenerationJob | null {
   };
 }
 
+type DiagnosticIncidentSummary = {
+  id: string;
+  status: SystemIncidentStatus;
+  severity: SystemIncidentSeverity;
+  causeStatus: SystemCauseStatus;
+  title: string;
+  count: number;
+  firstSeen: string;
+  lastSeen: string;
+};
+
+function normalizeDiagnosticIncident(item: unknown): DiagnosticIncidentSummary | null {
+  if (!item || typeof item !== "object") return null;
+  const incident = item as Partial<DiagnosticIncidentSummary>;
+  const status = incident.status;
+  const severity = incident.severity;
+  const causeStatus = incident.causeStatus;
+  if (status !== "OPEN" && status !== "ACKED" && status !== "RESOLVED") return null;
+  if (severity !== "INFO" && severity !== "WARN" && severity !== "HIGH" && severity !== "CRITICAL") return null;
+  if (causeStatus !== "KNOWN" && causeStatus !== "UNKNOWN") return null;
+  if (typeof incident.id !== "string" || incident.id.length === 0) return null;
+  if (typeof incident.title !== "string" || incident.title.length === 0) return null;
+  const count = typeof incident.count === "number" && Number.isFinite(incident.count)
+    ? Math.max(0, Math.floor(incident.count))
+    : 0;
+  return {
+    id: incident.id,
+    status,
+    severity,
+    causeStatus,
+    title: incident.title,
+    count,
+    firstSeen: typeof incident.firstSeen === "string" ? incident.firstSeen : new Date().toISOString(),
+    lastSeen: typeof incident.lastSeen === "string" ? incident.lastSeen : new Date().toISOString()
+  };
+}
+
+function shouldNotifySystemIncident(incident: DiagnosticIncidentSummary): boolean {
+  if (incident.status !== "OPEN") return false;
+  if (incident.severity === "CRITICAL") return true;
+  return incident.count >= INCIDENT_REPEAT_THRESHOLD_COUNT;
+}
+
 function mergeRealtimeJobs(current: GenerationJob[], updates: GenerationJob[]): GenerationJob[] {
   if (updates.length === 0) return current;
   const byId = new Map<string, GenerationJob>();
@@ -312,8 +366,10 @@ function normalizeNotification(value: unknown): AppNotification | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Partial<AppNotification>;
   const kind = item.kind;
-  if (kind !== "SUBMIT_FAILED" && kind !== "GENERATION_SUCCEEDED" && kind !== "GENERATION_FAILED") return null;
+  if (kind !== "SUBMIT_FAILED" && kind !== "GENERATION_SUCCEEDED" && kind !== "GENERATION_FAILED" && kind !== "SYSTEM_INCIDENT") return null;
   if (typeof item.id !== "string" || typeof item.title !== "string" || typeof item.message !== "string") return null;
+  const severity = item.severity;
+  const causeStatus = item.causeStatus;
   return {
     id: item.id,
     kind,
@@ -323,6 +379,9 @@ function normalizeNotification(value: unknown): AppNotification | null {
     imageName: typeof item.imageName === "string" ? item.imageName : null,
     imageAssetId: typeof item.imageAssetId === "string" ? item.imageAssetId : null,
     imagePreviewUrl: typeof item.imagePreviewUrl === "string" ? item.imagePreviewUrl : null,
+    incidentId: typeof item.incidentId === "string" ? item.incidentId : null,
+    severity: severity === "INFO" || severity === "WARN" || severity === "HIGH" || severity === "CRITICAL" ? severity : null,
+    causeStatus: causeStatus === "KNOWN" || causeStatus === "UNKNOWN" ? causeStatus : null,
     createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
     read: Boolean(item.read),
     folderId: typeof item.folderId === "string" ? item.folderId : null,
@@ -538,6 +597,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   const refreshMediaInFlightRef = useRef<Promise<void> | null>(null);
   const refreshRetryTimerRef = useRef<number | null>(null);
   const notificationsHydratedRef = useRef(false);
+  const notifiedIncidentIdsRef = useRef<Set<string>>(new Set());
 
   function pushNotification(input: Omit<AppNotification, "id" | "createdAt" | "read">): void {
     const notification: AppNotification = {
@@ -547,6 +607,33 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
       ...input
     };
     setNotifications((prev) => pruneNotifications([notification, ...prev]));
+  }
+
+  function pushSystemIncidentNotification(incident: DiagnosticIncidentSummary): void {
+    const notification: AppNotification = {
+      id: createNotificationId(),
+      kind: "SYSTEM_INCIDENT",
+      title: `System incident (${incident.severity})`,
+      message: incident.title,
+      typeLabel: "System incident",
+      incidentId: incident.id,
+      severity: incident.severity,
+      causeStatus: incident.causeStatus,
+      imageName: null,
+      imageAssetId: null,
+      imagePreviewUrl: null,
+      createdAt: incident.lastSeen,
+      read: false,
+      folderId: null,
+      jobId: null
+    };
+
+    setNotifications((prev) => {
+      if (prev.some((item) => item.kind === "SYSTEM_INCIDENT" && item.incidentId === incident.id)) {
+        return prev;
+      }
+      return pruneNotifications([notification, ...prev]);
+    });
   }
 
   function markNotificationRead(id: string): void {
@@ -1278,6 +1365,48 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    async function pollSystemIncidents(): Promise<void> {
+      try {
+        const response = await apiRequest<{ incidents?: unknown[] }>("/v1/diagnostics/incidents?status=OPEN&limit=120");
+        if (disposed) return;
+        const incidents = (response.incidents ?? [])
+          .map((item) => normalizeDiagnosticIncident(item))
+          .filter((item): item is DiagnosticIncidentSummary => Boolean(item));
+        for (const incident of incidents) {
+          if (!shouldNotifySystemIncident(incident)) continue;
+          if (notifiedIncidentIdsRef.current.has(incident.id)) continue;
+          pushSystemIncidentNotification(incident);
+          rememberNotifiedIncident(incident.id);
+        }
+      } catch (error) {
+        if (disposed) return;
+        void postClientDiagnostic({
+          severity: "WARN",
+          category: "CLIENT",
+          component: "web.projects_provider",
+          eventName: "diagnostics.poll_failed",
+          message: "Diagnostics incident polling failed",
+          workspaceId: "ws_demo",
+          context: {
+            error: error instanceof Error ? error.message : String(error)
+          }
+        });
+      }
+    }
+
+    void pollSystemIncidents();
+    const timer = setInterval(() => {
+      void pollSystemIncidents();
+    }, INCIDENT_POLL_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     if (typeof EventSource === "undefined") return;
     const urls = realtimeSseUrls();
@@ -1288,6 +1417,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempt = 0;
     let urlIndex = 0;
+    let reconnectFailures: number[] = [];
+    let lastReconnectStormAt = 0;
 
     const closeSource = () => {
       if (!source) return;
@@ -1327,6 +1458,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
         opened = true;
         reconnectAttempt = 0;
         urlIndex = 0;
+        reconnectFailures = [];
       });
       nextSource.addEventListener("job.update", (event) => {
         onMessage((event as MessageEvent).data);
@@ -1335,6 +1467,25 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
         onMessage(event.data);
       };
       nextSource.onerror = () => {
+        const now = Date.now();
+        reconnectFailures = reconnectFailures.filter((timestamp) => now - timestamp <= 60_000);
+        reconnectFailures.push(now);
+        if (reconnectFailures.length >= 5 && now - lastReconnectStormAt > 60_000) {
+          lastReconnectStormAt = now;
+          void postClientDiagnostic({
+            severity: "WARN",
+            category: "REALTIME",
+            component: "web.projects_provider",
+            eventName: "realtime.sse.reconnect_storm",
+            message: "Repeated SSE reconnect failures detected",
+            workspaceId: WORKSPACE_ID,
+            context: {
+              url: nextUrl,
+              reconnectAttempt,
+              failuresInWindow: reconnectFailures.length
+            }
+          });
+        }
         closeSource();
         if (disposed) return;
         if (!opened && urlIndex < urls.length - 1) {
@@ -1392,6 +1543,20 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(NOTIFIED_INCIDENT_IDS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      const validIds = parsed.filter((id): id is string => typeof id === "string");
+      notifiedIncidentIdsRef.current = new Set(validIds);
+    } catch {
+      notifiedIncidentIdsRef.current = new Set();
+    }
+  }, []);
+
   function rememberNotifiedJob(jobId: string): void {
     if (!jobId) return;
     const next = new Set(notifiedTerminalJobIdsRef.current);
@@ -1401,6 +1566,20 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     try {
       const compact = Array.from(next).slice(-500);
       window.localStorage.setItem(NOTIFIED_TERMINAL_JOB_IDS_STORAGE_KEY, JSON.stringify(compact));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  function rememberNotifiedIncident(incidentId: string): void {
+    if (!incidentId) return;
+    const next = new Set(notifiedIncidentIdsRef.current);
+    next.add(incidentId);
+    notifiedIncidentIdsRef.current = next;
+    if (typeof window === "undefined") return;
+    try {
+      const compact = Array.from(next).slice(-500);
+      window.localStorage.setItem(NOTIFIED_INCIDENT_IDS_STORAGE_KEY, JSON.stringify(compact));
     } catch {
       // Ignore storage failures.
     }

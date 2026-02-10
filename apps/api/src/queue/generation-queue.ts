@@ -29,7 +29,7 @@ export class GenerationQueue {
         continue;
       }
       await executeGeneration(this.store, this.adapters, job);
-      this.runtime.jobSubscribers.forEach((subscriber) => subscriber(job));
+      this.runtime.notifyJobSubscribers(job, "generation-queue.tick");
     }
     this.running = false;
   }

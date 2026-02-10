@@ -1,4 +1,14 @@
-import type { GenerationJob, GenerationRequest, Workspace } from "@aidrive/shared";
+import type {
+  DiagnosticCategory,
+  DiagnosticEvent,
+  DiagnosticIncident,
+  DiagnosticIncidentPrompts,
+  DiagnosticSeverity,
+  GenerationJob,
+  GenerationRequest,
+  IncidentStatus,
+  Workspace
+} from "@aidrive/shared";
 
 export interface ApiClientOptions {
   baseUrl: string;
@@ -52,5 +62,69 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(payload)
     });
+  }
+
+  listDiagnosticIncidents(params?: {
+    status?: IncidentStatus;
+    severity?: DiagnosticSeverity;
+    since?: string;
+    limit?: number;
+  }): Promise<{ incidents: DiagnosticIncident[] }> {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.severity) query.set("severity", params.severity);
+    if (params?.since) query.set("since", params.since);
+    if (typeof params?.limit === "number") query.set("limit", String(params.limit));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.request(`/v1/diagnostics/incidents${suffix}`, { method: "GET" });
+  }
+
+  getDiagnosticIncident(incidentId: string): Promise<{ incident: DiagnosticIncident }> {
+    return this.request(`/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}`, { method: "GET" });
+  }
+
+  ackDiagnosticIncident(incidentId: string): Promise<{ incident: DiagnosticIncident }> {
+    return this.request(`/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/ack`, { method: "POST" });
+  }
+
+  resolveDiagnosticIncident(incidentId: string): Promise<{ incident: DiagnosticIncident }> {
+    return this.request(`/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/resolve`, { method: "POST" });
+  }
+
+  listDiagnosticEvents(params?: {
+    severity?: DiagnosticSeverity;
+    category?: DiagnosticCategory;
+    eventName?: string;
+    incidentId?: string;
+    since?: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ events: DiagnosticEvent[]; nextCursor: string | null }> {
+    const query = new URLSearchParams();
+    if (params?.severity) query.set("severity", params.severity);
+    if (params?.category) query.set("category", params.category);
+    if (params?.eventName) query.set("eventName", params.eventName);
+    if (params?.incidentId) query.set("incidentId", params.incidentId);
+    if (params?.since) query.set("since", params.since);
+    if (typeof params?.limit === "number") query.set("limit", String(params.limit));
+    if (params?.cursor) query.set("cursor", params.cursor);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.request(`/v1/diagnostics/events${suffix}`, { method: "GET" });
+  }
+
+  getIncidentPacket(incidentId: string): Promise<{ packet: string }> {
+    return this.request(`/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/packet`, { method: "GET" });
+  }
+
+  getDiagnosticIncidentPacket(incidentId: string): Promise<{ packet: string }> {
+    return this.getIncidentPacket(incidentId);
+  }
+
+  getIncidentPrompts(incidentId: string): Promise<{ prompts: DiagnosticIncidentPrompts }> {
+    return this.request(`/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/prompts`, { method: "GET" });
+  }
+
+  getDiagnosticIncidentPrompts(incidentId: string): Promise<{ prompts: DiagnosticIncidentPrompts }> {
+    return this.getIncidentPrompts(incidentId);
   }
 }

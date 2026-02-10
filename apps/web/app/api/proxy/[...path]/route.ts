@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
+import { createServerTraceId, emitServerDiagnostic } from "../../../../lib/diagnostics-server";
 
 export const runtime = "nodejs";
 
 const DEFAULT_TARGETS = ["http://127.0.0.1:4100", "http://127.0.0.1:4000"];
+const PROXY_FORWARD_TIMEOUT_MS = Math.max(1_000, Number(process.env.AIDRIVE_PROXY_TIMEOUT_MS ?? 12_000));
+const TRACE_HEADER_NAME = "x-aidrive-trace-id";
 
 function proxyFallbackEnabled(): boolean {
   const raw = process.env.AIDRIVE_ENABLE_PROXY_FALLBACK;
@@ -810,12 +813,23 @@ function targetBaseUrls(): string[] {
     .filter((part) => part.length > 0);
 }
 
-async function forward(request: NextRequest, path: string[]): Promise<NextResponse> {
+function routeFromPath(pathSegments: string[]): string {
+  return `/${pathSegments.join("/")}`;
+}
+
+function traceIdFromRequest(request: NextRequest): string {
+  return createServerTraceId(request.headers.get(TRACE_HEADER_NAME));
+}
+
+async function forward(request: NextRequest, pathSegments: string[]): Promise<NextResponse> {
   const qs = request.nextUrl.search || "";
-  const suffix = `/${path.join("/")}${qs}`;
+  const route = routeFromPath(pathSegments);
+  const suffix = `${route}${qs}`;
+  const traceId = traceIdFromRequest(request);
 
   const headers = new Headers(request.headers);
   headers.delete("host");
+  headers.set(TRACE_HEADER_NAME, traceId);
   if (!headers.has("x-user-id")) {
     headers.set("x-user-id", "user_demo");
   }
@@ -825,25 +839,76 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
 
   let lastError: unknown = null;
   let lastServerFailure: { status: number; headers: Headers; body: ArrayBuffer } | null = null;
+  const targets = targetBaseUrls();
+  const fallbackAllowed = proxyFallbackEnabled();
 
-  for (const base of targetBaseUrls()) {
+  for (let index = 0; index < targets.length; index += 1) {
+    const base = targets[index];
+    const attempt = index + 1;
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PROXY_FORWARD_TIMEOUT_MS);
     try {
       const upstream = await fetch(`${base}${suffix}`, {
         method,
         headers,
         body,
-        redirect: "manual"
+        redirect: "manual",
+        signal: controller.signal
       });
+      const latencyMs = Math.max(0, Date.now() - startedAt);
 
       const responseHeaders = new Headers(upstream.headers);
       responseHeaders.delete("content-encoding");
       responseHeaders.delete("content-length");
       responseHeaders.delete("transfer-encoding");
+      responseHeaders.set(TRACE_HEADER_NAME, traceId);
 
       const responseBody = await upstream.arrayBuffer();
       if (upstream.status >= 500) {
         lastServerFailure = { status: upstream.status, headers: responseHeaders, body: responseBody };
+        void emitServerDiagnostic({
+          severity: "WARN",
+          category: "PROXY",
+          component: "web.api_proxy",
+          eventName: "proxy.forward.upstream_5xx",
+          message: "Proxy upstream returned server error",
+          workspaceId: "ws_demo",
+          traceId,
+          context: {
+            route,
+            method,
+            baseUrl: base,
+            attempt,
+            attemptsTotal: targets.length,
+            statusCode: upstream.status,
+            latencyMs,
+            timeoutMs: PROXY_FORWARD_TIMEOUT_MS
+          }
+        });
         continue;
+      }
+
+      if (attempt > 1) {
+        void emitServerDiagnostic({
+          severity: "WARN",
+          category: "PROXY",
+          component: "web.api_proxy",
+          eventName: "proxy.forward.recovered_after_failover",
+          message: "Proxy request recovered after failover",
+          workspaceId: "ws_demo",
+          traceId,
+          context: {
+            route,
+            method,
+            baseUrl: base,
+            attempt,
+            attemptsTotal: targets.length,
+            statusCode: upstream.status,
+            latencyMs,
+            timeoutMs: PROXY_FORWARD_TIMEOUT_MS
+          }
+        });
       }
 
       return new NextResponse(responseBody, {
@@ -852,31 +917,108 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
       });
     } catch (error) {
       lastError = error;
+      const latencyMs = Math.max(0, Date.now() - startedAt);
+      const timedOut = error instanceof Error && error.name === "AbortError";
+      void emitServerDiagnostic({
+        severity: timedOut ? "WARN" : "HIGH",
+        category: "PROXY",
+        component: "web.api_proxy",
+        eventName: timedOut ? "proxy.forward.timeout" : "proxy.forward.network_error",
+        message: timedOut ? "Proxy upstream attempt timed out" : "Proxy upstream attempt failed",
+        workspaceId: "ws_demo",
+        traceId,
+        context: {
+          route,
+          method,
+          baseUrl: base,
+          attempt,
+          attemptsTotal: targets.length,
+          latencyMs,
+          timeoutMs: PROXY_FORWARD_TIMEOUT_MS,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      });
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
   if (lastServerFailure) {
+    lastServerFailure.headers.set(TRACE_HEADER_NAME, traceId);
+    void emitServerDiagnostic({
+      severity: "HIGH",
+      category: "PROXY",
+      component: "web.api_proxy",
+      eventName: "proxy.forward.exhausted_with_5xx",
+      message: "All proxy upstream attempts ended with server errors",
+      workspaceId: "ws_demo",
+      traceId,
+      context: {
+        route,
+        method,
+        statusCode: lastServerFailure.status,
+        attemptsTotal: targets.length,
+        timeoutMs: PROXY_FORWARD_TIMEOUT_MS
+      }
+    });
     return new NextResponse(lastServerFailure.body, {
       status: lastServerFailure.status,
       headers: lastServerFailure.headers
     });
   }
 
-  if (proxyFallbackEnabled()) {
-    const fallback = localFallback(method, path, body);
+  if (fallbackAllowed) {
+    const fallback = localFallback(method, pathSegments, body);
     if (fallback) {
       fallback.headers.set("x-aidrive-proxy-fallback", "1");
+      fallback.headers.set(TRACE_HEADER_NAME, traceId);
+      void emitServerDiagnostic({
+        severity: "WARN",
+        category: "PROXY",
+        component: "web.api_proxy",
+        eventName: "proxy.fallback.activated",
+        message: "Proxy local fallback response activated",
+        workspaceId: "ws_demo",
+        traceId,
+        context: {
+          route,
+          method,
+          attemptsTotal: targets.length,
+          timeoutMs: PROXY_FORWARD_TIMEOUT_MS,
+          fallbackReason: lastError instanceof Error ? lastError.message : "upstream_unavailable"
+        }
+      });
       return fallback;
     }
   }
 
-  return NextResponse.json(
+  void emitServerDiagnostic({
+    severity: "HIGH",
+    category: "PROXY",
+    component: "web.api_proxy",
+    eventName: "proxy.forward.unavailable",
+    message: "Proxy could not reach upstream and no fallback response was available",
+    workspaceId: "ws_demo",
+    traceId,
+    context: {
+      route,
+      method,
+      attemptsTotal: targets.length,
+      timeoutMs: PROXY_FORWARD_TIMEOUT_MS,
+      fallbackEnabled: fallbackAllowed,
+      error: lastError instanceof Error ? lastError.message : String(lastError ?? "unknown")
+    }
+  });
+
+  const response = NextResponse.json(
     {
       error: "API upstream unavailable",
       details: lastError instanceof Error ? lastError.message : "Unknown error"
     },
     { status: 503 }
   );
+  response.headers.set(TRACE_HEADER_NAME, traceId);
+  return response;
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
