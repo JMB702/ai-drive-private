@@ -190,9 +190,19 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="sidebar-nav">
-        <button className={pathname === "/" && sidebarFocus === "dashboard" ? "active" : ""} type="button" onClick={focusDashboard}>Dashboard</button>
-        <Link className={pathname === "/drive" ? "active" : ""} href="/drive" onClick={onNavigate}>All Images</Link>
-        <Link className={pathname === "/videos" ? "active" : ""} href="/videos" onClick={onNavigate}>All Videos</Link>
+        <Link
+          className={`sidebar-nav-item ${pathname === "/" && sidebarFocus === "dashboard" ? "active" : ""}`}
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate?.();
+            focusDashboard();
+          }}
+        >
+          Dashboard
+        </Link>
+        <Link className={`sidebar-nav-item ${pathname === "/drive" ? "active" : ""}`} href="/drive" onClick={onNavigate}>All Images</Link>
+        <Link className={`sidebar-nav-item ${pathname === "/videos" ? "active" : ""}`} href="/videos" onClick={onNavigate}>All Videos</Link>
       </nav>
 
       <div className="sidebar-projects">

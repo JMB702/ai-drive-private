@@ -20,6 +20,10 @@ services:
         value: /data
       - key: AIDRIVE_DISABLE_PERSISTENCE
         value: "0"
+      - key: AIDRIVE_SEED_SAMPLE_DATA
+        value: "0"
+      - key: AIDRIVE_ENABLE_PROXY_FALLBACK
+        value: "0"
       - key: API_BODY_LIMIT_MB
         value: "8"
       - key: APP_ACCESS_USERNAME
@@ -42,4 +46,3 @@ services:
       name: aidrive-data
       mountPath: /data
       sizeGB: 20
-
