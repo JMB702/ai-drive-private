@@ -7,6 +7,15 @@ export const runtime = "nodejs";
 
 const DEFAULT_TARGETS = ["http://127.0.0.1:4100", "http://127.0.0.1:4000"];
 
+function proxyFallbackEnabled(): boolean {
+  const raw = process.env.AIDRIVE_ENABLE_PROXY_FALLBACK;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+  }
+  return process.env.NODE_ENV !== "production";
+}
+
 type LocalFolder = {
   id: string;
   workspaceId: string;
@@ -853,9 +862,12 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
     });
   }
 
-  const fallback = localFallback(method, path, body);
-  if (fallback) {
-    return fallback;
+  if (proxyFallbackEnabled()) {
+    const fallback = localFallback(method, path, body);
+    if (fallback) {
+      fallback.headers.set("x-aidrive-proxy-fallback", "1");
+      return fallback;
+    }
   }
 
   return NextResponse.json(

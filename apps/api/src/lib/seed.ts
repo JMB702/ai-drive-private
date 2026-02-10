@@ -2,7 +2,12 @@ import { nanoid } from "nanoid";
 import type { AppContext } from "./context.js";
 import { nowIso } from "./time.js";
 
-export function seedData(ctx: AppContext): void {
+type SeedOptions = {
+  sampleProjectCount?: number;
+};
+
+export function seedData(ctx: AppContext, options: SeedOptions = {}): void {
+  const sampleProjectCount = Math.max(0, Math.trunc(options.sampleProjectCount ?? 8));
   const user = {
     id: "user_demo",
     email: "owner@example.com",
@@ -28,16 +33,18 @@ export function seedData(ctx: AppContext): void {
 
   ctx.store.workspaceCreditBalance[workspace.id] = 1_000;
 
-  for (let i = 1; i <= 8; i += 1) {
-    ctx.store.folders.push({
-      id: nanoid(),
-      workspaceId: workspace.id,
-      parentId: null,
-      name: `Sample Project ${String(i).padStart(2, "0")}`,
-      deletedAt: null,
-      createdBy: user.id,
-      createdAt: nowIso()
-    });
+  if (sampleProjectCount > 0) {
+    for (let i = 1; i <= sampleProjectCount; i += 1) {
+      ctx.store.folders.push({
+        id: nanoid(),
+        workspaceId: workspace.id,
+        parentId: null,
+        name: `Sample Project ${String(i).padStart(2, "0")}`,
+        deletedAt: null,
+        createdBy: user.id,
+        createdAt: nowIso()
+      });
+    }
   }
 
   ctx.store.permissionGrants.push({

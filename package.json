@@ -13,6 +13,7 @@
     "dev:stop": "sh -c '(pkill -f \"next dev\" || true); (pkill -f \"tsx watch src/server.ts\" || true); (lsof -ti tcp:3000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4000 | xargs kill -9) 2>/dev/null || true; (lsof -ti tcp:4100 | xargs kill -9) 2>/dev/null || true'",
     "dev:reset": "npm run -w @aidrive/web clean && npm run dev",
     "start:prod": "node scripts/prod-supervisor.mjs",
+    "migrate:remote-data": "node scripts/migrate-local-data-to-remote.mjs",
     "test": "npm run -w @aidrive/api test",
     "lint": "npm run -ws lint"
   },

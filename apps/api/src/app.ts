@@ -12,6 +12,7 @@ import { registerModerationRoutes } from "./modules/moderation/routes.js";
 import { registerAuditRoutes } from "./modules/audit/routes.js";
 import { registerRealtimeRoutes } from "./modules/realtime/routes.js";
 import { registerPermissionRoutes } from "./modules/permissions/routes.js";
+import { registerAdminRoutes } from "./modules/admin/routes.js";
 import { createAdapters } from "./providers/adapters.js";
 import { createContext } from "./lib/context.js";
 import { seedData } from "./lib/seed.js";
@@ -28,9 +29,11 @@ export async function buildApp() {
   await app.register(cors, { origin: true });
 
   const ctx = createContext(createAdapters(env));
+  const allowSampleSeed = process.env.AIDRIVE_SEED_SAMPLE_DATA === "1" || env.NODE_ENV !== "production";
+  const seedProjectCount = allowSampleSeed ? 8 : 0;
   const persistenceDisabled = process.env.AIDRIVE_DISABLE_PERSISTENCE === "1";
   if (persistenceDisabled) {
-    seedData(ctx);
+    seedData(ctx, { sampleProjectCount: seedProjectCount });
     app.log.info("Store persistence disabled (AIDRIVE_DISABLE_PERSISTENCE=1)");
   } else {
     const persisted = loadPersistedStore();
@@ -47,7 +50,7 @@ export async function buildApp() {
         }
       }
     } else {
-      seedData(ctx);
+      seedData(ctx, { sampleProjectCount: seedProjectCount });
     }
   }
 
@@ -144,6 +147,7 @@ export async function buildApp() {
   await registerModerationRoutes(app);
   await registerAuditRoutes(app);
   await registerRealtimeRoutes(app);
+  await registerAdminRoutes(app);
 
   return app;
 }

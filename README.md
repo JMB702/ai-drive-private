@@ -34,7 +34,7 @@ Monorepo for a Google Drive-style file platform with built-in image/video genera
 - Integration tests for route behavior
 
 ## Notes
-- Current persistence is in-memory for rapid bootstrapping.
+- Runtime store persists to disk (`AIDRIVE_DATA_DIR`, default `apps/api/.data` locally).
 - SQL schema for Postgres is in `apps/api/src/db/schema.sql`.
 - Provider integrations are adapter-based; Gemini can call API when key is configured.
 
@@ -42,3 +42,4 @@ Monorepo for a Google Drive-style file platform with built-in image/video genera
 - To run AI Drive on an always-on cloud host (so it stays available when your laptop is off), use `docs/always-on-deploy.md`.
 - This deployment keeps generated assets/history on a persistent volume mounted at `/data`.
 - Fastest no-VM path: `docs/render-deploy.md` (Render Blueprint via `render.yaml`).
+- One-time migration helper for existing local data: `npm run migrate:remote-data`.

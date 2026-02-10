@@ -26,3 +26,19 @@ If you don't want to manage a VM/IP, deploy with Render using the included Bluep
 - After Render URL is verified (login works, images persist after restart), switch to that URL.
 - Then you can shut down local setup.
 
+## One-time local data migration (existing images/history)
+If Render starts with sample/empty data, your old images are still local. Migrate them once:
+
+1. Ensure local data exists:
+   - `apps/api/.data/api-store.json`
+   - `apps/api/.data/previews/*`
+2. Export your Render app credentials in terminal:
+   - `export APP_ACCESS_USERNAME='...'`
+   - `export APP_ACCESS_PASSWORD='...'`
+3. Run migration:
+   - `TARGET_URL='https://ai-drive-private.onrender.com' npm run migrate:remote-data`
+4. Hard refresh Render app in browser.
+
+Notes:
+- This migration does not generate replacement images.
+- It imports your existing local store and uploads referenced preview blobs.
