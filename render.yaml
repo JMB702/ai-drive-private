@@ -5,7 +5,7 @@ services:
     dockerContext: .
     dockerfilePath: ./Dockerfile
     plan: starter
-    autoDeployTrigger: off
+    autoDeployTrigger: on
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
