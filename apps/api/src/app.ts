@@ -26,6 +26,7 @@ import {
   persistedStorePrimaryPath,
   savePersistedStore,
   savePersistedStoreAsync,
+  syncPreviewBlobsFromStoreSource,
   setPersistenceDiagnosticsHook
 } from "./lib/persistence.js";
 import { DiagnosticsEmitter } from "./lib/diagnostics/emit.js";
@@ -150,7 +151,14 @@ export async function buildApp() {
       if (path.resolve(persisted.sourcePath) !== path.resolve(preferredStorePath)) {
         try {
           const migratedPath = savePersistedStore(ctx.store);
+          const previewSync = syncPreviewBlobsFromStoreSource(ctx.store, persisted.sourcePath);
           app.log.warn(`Migrated persisted store to ${migratedPath} (legacy source was ${persisted.sourcePath})`);
+          if (previewSync) {
+            app.log.warn(
+              `Synced preview blobs from ${previewSync.sourceDir} to ${previewSync.targetDir} ` +
+              `(copied:${previewSync.copied} skipped:${previewSync.skipped} missing:${previewSync.missing})`
+            );
+          }
           diagnostics.emit({
             severity: "WARN",
             category: "PERSISTENCE",
@@ -159,7 +167,10 @@ export async function buildApp() {
             message: "Persisted store migrated from legacy path",
             context: {
               sourcePath: persisted.sourcePath,
-              migratedPath
+              migratedPath,
+              previewSyncCopied: previewSync?.copied ?? 0,
+              previewSyncSkipped: previewSync?.skipped ?? 0,
+              previewSyncMissing: previewSync?.missing ?? 0
             }
           });
         } catch (error) {

@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { InMemoryStore } from "./types.js";
 import { createStore } from "./store.js";
-import { sanitizeInlinePreviewMetadata } from "./media-preview.js";
+import { previewBlobKeyFromStorageKey, sanitizeInlinePreviewMetadata } from "./media-preview.js";
 import { resolveApiDataPath } from "./data-paths.js";
 
 const STORE_FILE_NAME = "api-store.json";
@@ -39,13 +39,26 @@ function legacyCandidateStorePaths(cwd: string): string[] {
   ];
 }
 
+function bundledRecoveryCandidateStorePaths(cwd: string): string[] {
+  return [
+    path.join(cwd, ".recovery-data", STORE_FILE_NAME),
+    path.join(cwd, "apps", "api", ".recovery-data", STORE_FILE_NAME),
+    path.join(cwd, "..", ".recovery-data", STORE_FILE_NAME),
+    path.join(cwd, "..", "..", ".recovery-data", STORE_FILE_NAME)
+  ];
+}
+
 function preferredStorePath(): string {
   return resolveApiDataPath(STORE_FILE_NAME);
 }
 
 function candidateStorePaths(cwd: string): string[] {
   const seen = new Set<string>();
-  const list = [preferredStorePath(), ...legacyCandidateStorePaths(cwd)];
+  const list = [
+    preferredStorePath(),
+    ...legacyCandidateStorePaths(cwd),
+    ...bundledRecoveryCandidateStorePaths(cwd)
+  ];
   const ordered: string[] = [];
   for (const candidate of list) {
     const resolved = path.resolve(candidate);
@@ -111,6 +124,18 @@ function storeRecordCount(store: InMemoryStore): number {
   return assets + versions + jobs + folders;
 }
 
+function isLikelySampleOnlyStore(store: InMemoryStore): boolean {
+  const assets = Array.isArray(store.assets) ? store.assets.length : 0;
+  const versions = Array.isArray(store.versions) ? store.versions.length : 0;
+  if (assets > 0 || versions > 0) return false;
+
+  const folders = Array.isArray(store.folders) ? store.folders : [];
+  const activeFolders = folders.filter((folder) => folder && folder.deletedAt === null);
+  if (activeFolders.length === 0) return true;
+  if (activeFolders.length > 12) return false;
+  return activeFolders.every((folder) => /^sample project \d{2}$/i.test(String(folder.name ?? "")));
+}
+
 function loadStoreCandidate(filePath: string): { store: InMemoryStore; sourcePath: string; recordCount: number; mtimeMs: number } | null {
   if (!fs.existsSync(filePath)) return null;
   try {
@@ -147,8 +172,26 @@ export function loadPersistedStore(cwd = process.cwd()): { store: InMemoryStore;
 
   const preferred = path.resolve(preferredStorePath());
   const preferredCandidate = candidates.find((candidate) => path.resolve(candidate.sourcePath) === preferred);
-  if (preferredCandidate && preferredCandidate.recordCount > 0) {
+  if (
+    preferredCandidate &&
+    preferredCandidate.recordCount > 0 &&
+    !isLikelySampleOnlyStore(preferredCandidate.store)
+  ) {
     return { store: preferredCandidate.store, sourcePath: preferredCandidate.sourcePath };
+  }
+
+  const nonSampleCandidates = candidates.filter(
+    (candidate) => candidate.recordCount > 0 && !isLikelySampleOnlyStore(candidate.store)
+  );
+  if (nonSampleCandidates.length > 0) {
+    nonSampleCandidates.sort((left, right) => {
+      if (left.recordCount !== right.recordCount) {
+        return right.recordCount - left.recordCount;
+      }
+      return right.mtimeMs - left.mtimeMs;
+    });
+    const selected = nonSampleCandidates[0];
+    return { store: selected.store, sourcePath: selected.sourcePath };
   }
 
   candidates.sort((left, right) => {
@@ -195,4 +238,79 @@ export function resolveLegacyStorePath(cwd = process.cwd()): string | null {
     if (fs.existsSync(resolved)) return resolved;
   }
   return null;
+}
+
+const PREVIEW_BLOB_KEY_PATTERN = /^[a-f0-9]{40}\.[a-z0-9]+$/i;
+
+function normalizedPreviewBlobKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!PREVIEW_BLOB_KEY_PATTERN.test(trimmed)) return null;
+  return trimmed;
+}
+
+function previewBlobKeysFromStore(store: InMemoryStore): string[] {
+  const keys = new Set<string>();
+
+  for (const version of store.versions) {
+    const metadata = version.metadata && typeof version.metadata === "object"
+      ? (version.metadata as Record<string, unknown>)
+      : {};
+    const fromMetadata = normalizedPreviewBlobKey(metadata.previewBlob);
+    if (fromMetadata) keys.add(fromMetadata);
+    const fromStorage = previewBlobKeyFromStorageKey(version.storageKey);
+    if (fromStorage) keys.add(fromStorage);
+  }
+
+  for (const job of store.generationJobs) {
+    const providerMetadata = job.result?.providerMetadata;
+    if (!providerMetadata || typeof providerMetadata !== "object") continue;
+    const fromMetadata = normalizedPreviewBlobKey((providerMetadata as Record<string, unknown>).previewBlob);
+    if (fromMetadata) keys.add(fromMetadata);
+  }
+
+  return [...keys];
+}
+
+export type SyncedPreviewBlobs = {
+  sourceDir: string;
+  targetDir: string;
+  copied: number;
+  skipped: number;
+  missing: number;
+};
+
+export function syncPreviewBlobsFromStoreSource(store: InMemoryStore, sourcePath: string): SyncedPreviewBlobs | null {
+  const sourceDir = path.resolve(path.dirname(sourcePath), "previews");
+  if (!fs.existsSync(sourceDir)) return null;
+
+  const targetDir = resolveApiDataPath("previews");
+  fs.mkdirSync(targetDir, { recursive: true });
+  const blobs = previewBlobKeysFromStore(store);
+  let copied = 0;
+  let skipped = 0;
+  let missing = 0;
+
+  for (const blobKey of blobs) {
+    const sourceFile = path.join(sourceDir, blobKey);
+    if (!fs.existsSync(sourceFile)) {
+      missing += 1;
+      continue;
+    }
+    const targetFile = path.join(targetDir, blobKey);
+    if (fs.existsSync(targetFile)) {
+      skipped += 1;
+      continue;
+    }
+    fs.copyFileSync(sourceFile, targetFile);
+    copied += 1;
+  }
+
+  return {
+    sourceDir,
+    targetDir,
+    copied,
+    skipped,
+    missing
+  };
 }
