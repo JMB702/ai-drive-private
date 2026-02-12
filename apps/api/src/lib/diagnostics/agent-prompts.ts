@@ -194,8 +194,11 @@ function threadCloseUsageBlock(incident: DiagnosticIncident): string[] {
     "- For each diagnostic tool used, list: tool, exact endpoint/command, purpose, and outcome.",
     "- For each tool used, include helpfulness score: 1-5.",
     "- For any tool scored 3 or below, include one concrete improvement suggestion.",
+    "- If improvement is small and does not require large context expansion, implement it immediately and include autoImproved=true.",
+    "- If improvement would require too much context window, do not block the task; include deferred=true and deferNote=<what to improve later>.",
     "- If a required tool was not used, include it with outcome=NOT_USED and explain why.",
     "- Include this exact line at the end: diagnosticsEvidenceComplete=true|false",
+    `- After writing the section, submit it to POST /v1/diagnostics/incidents/${incident.id}/agent-report as reportText so tool analytics can improve automatically.`,
     `- Required minimum tools for this incident: /v1/diagnostics/incidents/${incident.id}, /v1/diagnostics/events?fingerprint=${incident.fingerprint}&limit=500, /v1/diagnostics/incidents/${incident.id}/packet`
   ];
 }

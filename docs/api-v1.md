@@ -42,6 +42,7 @@ Auth (dev): pass `x-user-id` header.
 - `POST /diagnostics/incidents/:incidentId/resolve`
 - `GET /diagnostics/incidents/:incidentId/packet`
 - `GET /diagnostics/incidents/:incidentId/prompts`
+- `POST /diagnostics/incidents/:incidentId/agent-report`
 - `GET /diagnostics/events?severity=&category=&eventName=&incidentId=&since=&limit=&cursor=`
 - `POST /diagnostics/ingest`
 

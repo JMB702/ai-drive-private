@@ -18,7 +18,8 @@ export function DashboardView() {
     sidebarFocus,
     projectSelectionToken,
     setSidebarFocusDashboard,
-    setSidebarFocusFolder
+    setSidebarFocusFolder,
+    setSidebarFocusAllImages
   } = useProjects();
   const projectTilesRef = useRef<HTMLElement | null>(null);
   const photoGridRef = useRef<HTMLElement | null>(null);
@@ -55,14 +56,29 @@ export function DashboardView() {
 
   useEffect(() => {
     const updateFocus = () => {
-      const element = projectTilesRef.current;
-      if (!element) return;
-      const rect = element.getBoundingClientRect();
-      const visible = rect.bottom > 120 && rect.top < window.innerHeight * 0.7;
-      if (visible) {
+      const projectTiles = projectTilesRef.current;
+      const photoPanel = photoGridRef.current;
+      if (!projectTiles || !photoPanel) return;
+
+      const projectRect = projectTiles.getBoundingClientRect();
+      const photoRect = photoPanel.getBoundingClientRect();
+      const projectsVisible = projectRect.bottom > 120 && projectRect.top < window.innerHeight * 0.7;
+
+      if (selectedProjectId) {
+        if (projectsVisible) {
+          setSidebarFocusDashboard();
+        } else {
+          setSidebarFocusFolder();
+        }
+        return;
+      }
+
+      const focusLine = Math.min(Math.max(150, window.innerHeight * 0.28), 260);
+      const allImagesVisible = photoRect.top <= focusLine && photoRect.bottom > focusLine;
+      if (allImagesVisible) {
+        setSidebarFocusAllImages();
+      } else {
         setSidebarFocusDashboard();
-      } else if (selectedProjectId) {
-        setSidebarFocusFolder();
       }
     };
 
@@ -73,7 +89,7 @@ export function DashboardView() {
       window.removeEventListener("scroll", updateFocus);
       window.removeEventListener("resize", updateFocus);
     };
-  }, [selectedProjectId, setSidebarFocusDashboard, setSidebarFocusFolder]);
+  }, [selectedProjectId, setSidebarFocusAllImages, setSidebarFocusDashboard, setSidebarFocusFolder]);
 
   return (
     <main className="page">
@@ -97,10 +113,10 @@ export function DashboardView() {
         </aside>
       </div>
 
-      <section className={`panel compact dashboard-folder-panel ${selectedProject ? "dashboard-photo-panel" : ""}`} ref={photoGridRef}>
-        <h3>{selectedProject ? `${selectedProject.name} · Images` : "Select a project"}</h3>
+      <section className="panel compact dashboard-folder-panel dashboard-photo-panel" ref={photoGridRef}>
+        <h3>{selectedProject ? `${selectedProject.name} · Images` : "All Images"}</h3>
         {loadingAssets ? <p className="muted">Loading images...</p> : null}
-        <FolderAssetGrid />
+        <FolderAssetGrid scope={selectedProject ? "project" : "all"} />
       </section>
 
       {selectedAsset ? <AssetViewerModal /> : null}

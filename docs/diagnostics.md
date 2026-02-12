@@ -95,6 +95,7 @@ All diagnostics routes require `OWNER` or `ADMIN` role (demo-mode `user_demo` is
 - `POST /v1/diagnostics/incidents/:incidentId/resolve`
 - `GET /v1/diagnostics/incidents/:incidentId/packet`
 - `GET /v1/diagnostics/incidents/:incidentId/prompts`
+- `POST /v1/diagnostics/incidents/:incidentId/agent-report`
 - `GET /v1/diagnostics/events`
 - `POST /v1/diagnostics/ingest` (client/proxy/supervisor sink)
 
@@ -125,3 +126,11 @@ Structured incident prompts:
   - `triage`: determine root cause or explicit unknowns
   - `fix`: implement minimal, instrumented repair
   - `verify`: prove fix + diagnostics quality
+- prompts now instruct agents to submit their `DIAGNOSTICS_TOOL_USAGE` block to:
+  - `POST /v1/diagnostics/incidents/:incidentId/agent-report`
+  - this route parses usage/helpfulness/improvement lines and records:
+    - `diagnostics.tool.used`
+    - `diagnostics.tool.feedback`
+  - policy:
+    - if improvement is small and does not require large context expansion, agent should implement it immediately (`autoImproved=true`)
+    - if improvement requires too much context window, agent should continue the main task and submit deferred note (`deferred=true`, `deferNote=...`)

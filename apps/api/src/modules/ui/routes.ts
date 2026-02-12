@@ -17,9 +17,9 @@ const UI_PROFILES = {
       toolsDefaultCollapsed: true
     },
     referenceImages: {
-      maxPerImageDataUrlBytes: 1_300_000,
-      maxTotalDataUrlBytes: 3_800_000,
-      safeGenerationBodyBytes: 5_300_000
+      maxPerImageDataUrlBytes: 1_000_000,
+      maxTotalDataUrlBytes: 2_800_000,
+      safeGenerationBodyBytes: 3_800_000
     }
   },
   desktop: {

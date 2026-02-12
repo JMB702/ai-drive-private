@@ -9,6 +9,7 @@ function classifyFallback(raw: string): {
   retryable: boolean;
 } {
   const lower = raw.toLowerCase();
+  const statusCode = parseStatusCode(raw);
 
   if (lower.includes("prompt blocked by safety policy") || lower.includes("safety block")) {
     return {
@@ -31,14 +32,14 @@ function classifyFallback(raw: string): {
       retryable: false
     };
   }
-  if (lower.includes("unauthenticated") || lower.includes("permission_denied") || lower.includes("401") || lower.includes("403")) {
+  if (lower.includes("unauthenticated") || lower.includes("permission_denied") || statusCode === 401 || statusCode === 403) {
     return {
       category: "API_AUTH",
       suggestedFix: "Verify API key, permissions, and billing status.",
       retryable: false
     };
   }
-  if (lower.includes("rate limit") || lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("429")) {
+  if (lower.includes("rate limit") || lower.includes("quota") || lower.includes("resource_exhausted") || statusCode === 429) {
     return {
       category: "API_RATE_LIMIT",
       suggestedFix: "Retry later, reduce parallel requests, or increase provider quota.",
@@ -52,7 +53,14 @@ function classifyFallback(raw: string): {
       retryable: true
     };
   }
-  if (lower.includes("unavailable") || lower.includes("gateway") || lower.includes("500") || lower.includes("502") || lower.includes("503") || lower.includes("504")) {
+  if (
+    lower.includes("unavailable") ||
+    lower.includes("gateway") ||
+    statusCode === 500 ||
+    statusCode === 502 ||
+    statusCode === 503 ||
+    statusCode === 504
+  ) {
     return {
       category: "API_UNAVAILABLE",
       suggestedFix: "Retry shortly or fail over to another model.",

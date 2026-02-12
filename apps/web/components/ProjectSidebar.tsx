@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   fallbackImagePreview,
+  isSuccessfulGeneratedImageAsset,
+  latestPreferredFolderThumbnailById,
   type ProjectThumbnailPreference,
   PROJECT_DRAG_MIME,
   PROJECT_THUMBNAIL_PREFS_STORAGE_KEY,
@@ -23,7 +25,7 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
     selectedProjectId,
     sidebarFocus,
     selectProject,
-    setSidebarFocusDashboard,
+    selectHome,
     setCreateModalOpen,
     moveItemsToFolder,
     reorderSidebarFolders,
@@ -41,23 +43,7 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const PROJECT_EDITOR_EVENT = "aidrive:open-project-editor";
   const PROJECT_EDITOR_STORAGE_KEY = "aidrive:openProjectEditorId";
 
-  const latestAssetByFolderId = useMemo(() => {
-    const latest = new Map<string, (typeof assets)[number]>();
-    for (const asset of assets) {
-      if (!asset.folderId) continue;
-      const current = latest.get(asset.folderId);
-      if (!current) {
-        latest.set(asset.folderId, asset);
-        continue;
-      }
-      const currentTime = current.createdAt ? Date.parse(current.createdAt) : 0;
-      const nextTime = asset.createdAt ? Date.parse(asset.createdAt) : 0;
-      if (nextTime >= currentTime) {
-        latest.set(asset.folderId, asset);
-      }
-    }
-    return latest;
-  }, [assets]);
+  const latestAssetByFolderId = useMemo(() => latestPreferredFolderThumbnailById(assets), [assets]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -107,7 +93,7 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
     if (pref?.mode === "asset" && pref.assetId) {
       const asset = assets.find((item) => item.id === pref.assetId);
-      if (asset) {
+      if (asset && isSuccessfulGeneratedImageAsset(asset)) {
         return { src: resolveAssetPreview(asset), cropY: pref.cropY ?? defaultCropForAsset(asset.aspectRatio) };
       }
     }
@@ -136,8 +122,8 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
   }
 
-  function focusDashboard(): void {
-    setSidebarFocusDashboard();
+  function goHome(): void {
+    selectHome();
     onNavigate?.();
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "auto" });
@@ -217,13 +203,21 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="sidebar-card" ref={sidebarCardRef} style={{ transform: sidebarLiftPx > 0 ? `translateY(-${sidebarLiftPx}px)` : undefined }}>
-      <div className="sidebar-brand">
+      <Link
+        className="sidebar-brand"
+        href="/"
+        onClick={(event) => {
+          event.preventDefault();
+          goHome();
+        }}
+        aria-label="Go to Home"
+      >
         <span className="brand-dot" aria-hidden="true" />
         <div>
           <h1>AI Drive</h1>
           <p>Project Dashboard</p>
         </div>
-      </div>
+      </Link>
 
       <nav className="sidebar-nav">
         <Link
@@ -231,13 +225,12 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
           href="/"
           onClick={(event) => {
             event.preventDefault();
-            onNavigate?.();
-            focusDashboard();
+            goHome();
           }}
         >
           Dashboard
         </Link>
-        <Link className={`sidebar-nav-item ${pathname === "/drive" ? "active" : ""}`} href="/drive" onClick={onNavigate}>All Images</Link>
+        <Link className={`sidebar-nav-item ${pathname === "/drive" || (pathname === "/" && sidebarFocus === "all-images") ? "active" : ""}`} href="/drive" onClick={onNavigate}>All Images</Link>
         <Link className={`sidebar-nav-item ${pathname === "/videos" ? "active" : ""}`} href="/videos" onClick={onNavigate}>All Videos</Link>
       </nav>
 

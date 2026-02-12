@@ -121,6 +121,17 @@ function categoryFor(rawMessage: string, statusCode: number | null): GenerationF
 
   if (lower.includes("prompt blocked by safety policy")) return "SAFETY_BLOCK";
   if (lower.includes("aspect ratio is not enabled")) return "ASPECT_RATIO_UNSUPPORTED";
+  // Gemini can report ratio failure even when the underlying cause is a blocked/empty image response.
+  if (lower.includes("did not include inline image data")) return "CONTENT_POLICY";
+  if (lower.includes("missing a2e_api_key")) return "API_AUTH";
+  if (lower.includes("reference images must be public urls")) return "API_INVALID_ARGUMENT";
+  if (lower.includes("a2e reference upload init failed")) return "API_INVALID_ARGUMENT";
+  if (lower.includes("validation failed")) return "API_INVALID_ARGUMENT";
+  if (lower.includes("missing_field")) return "API_INVALID_ARGUMENT";
+  if (lower.includes("generation_error")) return "API_UNAVAILABLE";
+  if (lower.includes("a2e did not return image url") && lower.includes("status=failed")) return "API_UNAVAILABLE";
+  if (lower.includes("a2e task still processing after")) return "API_TIMEOUT";
+  if (lower.includes("a2e did not return image url") && lower.includes("status=processing")) return "API_TIMEOUT";
   if (lower.includes("could not produce requested aspect ratio")) return "ASPECT_RATIO_MISMATCH";
 
   if (lower.includes("unauthenticated") || lower.includes("permission_denied") || statusCode === 401 || statusCode === 403) {

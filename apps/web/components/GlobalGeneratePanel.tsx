@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, type DragEvent as ReactDragEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type CSSProperties, type DragEvent as ReactDragEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest } from "../lib/api";
 import { createTraceId, postClientDiagnostic } from "../lib/diagnostics-client";
 import {
@@ -20,7 +20,7 @@ type ModelPanelConfig = {
   aspectRatio: string;
   resolution: string;
 };
-type ReferenceImage = { id: string; name: string; dataUrl: string };
+type ReferenceImage = { id: string; name: string; dataUrl: string; sourceUrl?: string };
 type ProjectGeneratorSettings = {
   modelKey: ModelKey;
   selectedModelKeys: ModelKey[];
@@ -81,13 +81,17 @@ const MODEL_OPTIONS: Array<{
   { key: "gemini-2.0-flash", label: "Gemini 2.0 Flash", apiModel: "Gemini 2.0 flash", resolutions: ["1K"], maxReferenceImages: 3 },
   { key: "nano-banana-pro", label: "Nano Banana Pro", apiModel: "nano banana pro", resolutions: ["1K", "2K", "4K"], maxReferenceImages: 3 },
   { key: "nano-banana", label: "Nano Banana", apiModel: "nano banana", resolutions: ["1K"], maxReferenceImages: 3 },
-  { key: "a2e", label: "A2E", apiModel: "A2E Image generator", resolutions: ["1K", "2K", "4K"], maxReferenceImages: 3 }
+  { key: "a2e", label: "A2E", apiModel: "A2E Image generator", resolutions: ["1K", "2K", "4K"], maxReferenceImages: 2 }
 ];
 
+const ASPECT_RATIO_AUTO = "auto";
 const ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const A2E_SUPPORTED_ASPECT_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"];
 const IMAGE_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6];
 const DEFAULT_MODEL_KEY: ModelKey = "gemini-2.0-flash";
 const MODEL_KEYS: ModelKey[] = ["gemini-2.0-flash", "nano-banana-pro", "nano-banana", "a2e"];
+const MODEL_MENU_ANIMATION_MS = 240;
+const INLINE_MENU_ANIMATION_MS = 240;
 
 function parseAspectRatioValue(value: string): { width: number; height: number } | null {
   const parts = value.split(":");
@@ -99,15 +103,59 @@ function parseAspectRatioValue(value: string): { width: number; height: number }
 }
 
 function aspectRatioDisplayLabel(value: string): string {
+  if (value === ASPECT_RATIO_AUTO) return "Auto";
   const ratio = parseAspectRatioValue(value);
-  if (!ratio) return `▢ ${value}`;
-  if (ratio.width === ratio.height) return `▢ ${value}`;
-  if (ratio.width > ratio.height) {
-    const shape = ratio.width / ratio.height >= 2 ? "▭▭" : "▭";
-    return `${shape} ${value}`;
+  if (!ratio) return value;
+  return value;
+}
+
+function aspectRatioShapeStyle(value: string): CSSProperties {
+  if (value === ASPECT_RATIO_AUTO) {
+    return { width: "16px", height: "16px" };
   }
-  const shape = ratio.height / ratio.width >= 2 ? "▯▯" : "▯";
-  return `${shape} ${value}`;
+  const ratio = parseAspectRatioValue(value);
+  if (!ratio) return { width: "14px", height: "14px" };
+  const rawRatio = ratio.width / ratio.height;
+  const clampedRatio = Math.min(2.4, Math.max(0.38, rawRatio));
+  const maxDimension = 18;
+  const width = clampedRatio >= 1
+    ? maxDimension
+    : Math.round(maxDimension * clampedRatio);
+  const height = clampedRatio >= 1
+    ? Math.round(maxDimension / clampedRatio)
+    : maxDimension;
+  return {
+    width: `${Math.max(7, Math.min(32, width))}px`,
+    height: `${Math.max(10, Math.min(24, height))}px`
+  };
+}
+
+function aspectRatioShapeClassName(value: string): string {
+  return value === ASPECT_RATIO_AUTO ? "aspect-ratio-shape aspect-ratio-shape-auto" : "aspect-ratio-shape";
+}
+
+function defaultAspectRatioForModel(modelKey: ModelKey): string {
+  return modelKey === "a2e" ? ASPECT_RATIO_AUTO : "1:1";
+}
+
+function aspectRatioOptionsForModel(modelKey: ModelKey): string[] {
+  return [ASPECT_RATIO_AUTO, ...ASPECT_RATIOS];
+}
+
+function closestAspectRatioForValue(value: number, options: string[]): string {
+  if (!Number.isFinite(value) || value <= 0) return options[0] ?? "1:1";
+  let best = options[0] ?? "1:1";
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const option of options) {
+    const parsed = parseAspectRatioValue(option);
+    if (!parsed) continue;
+    const distance = Math.abs(parsed.width / parsed.height - value);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = option;
+    }
+  }
+  return best;
 }
 
 function normalizeSelectedModelKeys(keys: ModelKey[]): ModelKey[] {
@@ -315,13 +363,35 @@ function parseApiErrorMessage(raw: string | undefined): string | null {
   return null;
 }
 
+function isLikelyNetworkSubmitFailure(message: string | undefined): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("load failed") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("request timed out")
+  );
+}
+
 function withReferenceSettings(
   settings: GenerationJob["request"]["settings"],
-  references: ReferenceImage[]
+  references: ReferenceImage[],
+  model: string
 ): GenerationJob["request"]["settings"] {
   const next: GenerationJob["request"]["settings"] = { ...settings };
   for (let i = 0; i < references.length; i += 1) {
     next[`referenceImageDataUrl${i + 1}`] = references[i].dataUrl;
+    const sourceUrl = references[i].sourceUrl;
+    if (
+      model === "A2E Image generator" &&
+      typeof sourceUrl === "string" &&
+      sourceUrl.length > 0 &&
+      isPublicHttpUrl(sourceUrl)
+    ) {
+      next[`referenceImageUrl${i + 1}`] = sourceUrl;
+    }
   }
   return next;
 }
@@ -332,9 +402,36 @@ function withoutReferenceSettings(
   const next: GenerationJob["request"]["settings"] = {};
   for (const [key, value] of Object.entries(settings)) {
     if (key.startsWith("referenceImageDataUrl")) continue;
+    if (key.startsWith("referenceImageUrl")) continue;
     next[key] = value;
   }
   return next;
+}
+
+function toAbsoluteHttpUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  if (trimmed.startsWith("/") && typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${trimmed}`;
+  }
+  return null;
+}
+
+function isPublicHttpUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host.endsWith(".local")) {
+      return false;
+    }
+    if (/^10\./.test(host)) return false;
+    if (/^192\.168\./.test(host)) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function estimateGenerationBodyBytes(request: GenerationJob["request"]): number {
@@ -441,7 +538,14 @@ function sanitizeReferenceImages(value: unknown): ReferenceImage[] {
       typeof (item as { name?: unknown }).name === "string" &&
       typeof (item as { dataUrl?: unknown }).dataUrl === "string"
     )
-    .map((item) => ({ id: item.id, name: item.name, dataUrl: item.dataUrl }));
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      dataUrl: item.dataUrl,
+      sourceUrl: typeof (item as { sourceUrl?: unknown }).sourceUrl === "string"
+        ? (item as { sourceUrl: string }).sourceUrl
+        : undefined
+    }));
 }
 
 function readRefsByProjectFromLocalStorage(): Record<string, ReferenceImage[]> {
@@ -542,10 +646,10 @@ function isModelKey(value: string): value is ModelKey {
 
 function defaultModelConfigs(): Record<ModelKey, ModelPanelConfig> {
   return {
-    "gemini-2.0-flash": { count: 1, aspectRatio: "1:1", resolution: "1K" },
-    "nano-banana-pro": { count: 1, aspectRatio: "1:1", resolution: "1K" },
-    "nano-banana": { count: 1, aspectRatio: "1:1", resolution: "1K" },
-    a2e: { count: 1, aspectRatio: "1:1", resolution: "1K" }
+    "gemini-2.0-flash": { count: 1, aspectRatio: defaultAspectRatioForModel("gemini-2.0-flash"), resolution: "1K" },
+    "nano-banana-pro": { count: 1, aspectRatio: defaultAspectRatioForModel("nano-banana-pro"), resolution: "1K" },
+    "nano-banana": { count: 1, aspectRatio: defaultAspectRatioForModel("nano-banana"), resolution: "1K" },
+    a2e: { count: 1, aspectRatio: defaultAspectRatioForModel("a2e"), resolution: "1K" }
   };
 }
 
@@ -557,7 +661,8 @@ function normalizeModelConfig(key: ModelKey, value: unknown): ModelPanelConfig {
   const resolution = typeof candidate.resolution === "string" && model?.resolutions.includes(candidate.resolution)
     ? candidate.resolution
     : fallback.resolution;
-  const aspectRatio = typeof candidate.aspectRatio === "string" && ASPECT_RATIOS.includes(candidate.aspectRatio)
+  const aspectRatioOptions = aspectRatioOptionsForModel(key);
+  const aspectRatio = typeof candidate.aspectRatio === "string" && aspectRatioOptions.includes(candidate.aspectRatio)
     ? candidate.aspectRatio
     : fallback.aspectRatio;
   const count = typeof candidate.count === "number"
@@ -648,9 +753,15 @@ export function GlobalGeneratePanel() {
   const [toolsCollapsed, setToolsCollapsed] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [uiProfile, setUiProfile] = useState<UiProfile>(DEFAULT_UI_PROFILE);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelMenuClosing, setModelMenuClosing] = useState(false);
+  const [openInlineMenuId, setOpenInlineMenuId] = useState<string | null>(null);
+  const [closingInlineMenuIds, setClosingInlineMenuIds] = useState<Record<string, true>>({});
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const referencePickerRef = useRef<HTMLInputElement | null>(null);
-  const projectMenuRef = useRef<HTMLDetailsElement | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const modelMenuCloseTimeoutRef = useRef<number | null>(null);
+  const inlineMenuCloseTimeoutsRef = useRef<Record<string, number>>({});
   const dropDepthRef = useRef(0);
   const keyboardPressTimeoutRef = useRef<number | null>(null);
   const submitInFlightRef = useRef(false);
@@ -658,8 +769,14 @@ export function GlobalGeneratePanel() {
   const refsByProjectRef = useRef<Record<string, ReferenceImage[]>>({});
   const referenceImagesRef = useRef<ReferenceImage[]>([]);
   const settingsByProjectRef = useRef<Record<string, ProjectGeneratorSettings>>({});
+  const activeModelKeyRef = useRef<ModelKey>(DEFAULT_MODEL_KEY);
   const refsHydrationVersionRef = useRef(0);
   const suppressProjectScopedPersistRef = useRef(false);
+
+  function setActiveModelKey(next: ModelKey): void {
+    activeModelKeyRef.current = next;
+    setModelKey(next);
+  }
 
   const model = useMemo(() => MODEL_OPTIONS.find((item) => item.key === modelKey) ?? MODEL_OPTIONS[0], [modelKey]);
   const selectedModels = useMemo(() => {
@@ -668,7 +785,7 @@ export function GlobalGeneratePanel() {
   }, [selectedModelKeys]);
   const maxReferenceImages = useMemo(() => {
     if (selectedModels.length === 0) return 0;
-    return Math.min(...selectedModels.map((item) => item.maxReferenceImages));
+    return Math.max(...selectedModels.map((item) => item.maxReferenceImages));
   }, [selectedModels]);
   const supportsReferenceImages = selectedModels.length > 0 && selectedModels.every((item) => item.maxReferenceImages > 0);
   const selectedProjectName = useMemo(
@@ -695,10 +812,10 @@ export function GlobalGeneratePanel() {
         .map((item) => {
           const config = modelConfigs[item.key] ?? {
             count: 1,
-            aspectRatio: "1:1",
+            aspectRatio: defaultAspectRatioForModel(item.key),
             resolution: item.resolutions[0] ?? "1K"
           };
-          return `${item.label} · #${config.count} · ${config.aspectRatio} · ${config.resolution}`;
+          return `${item.label} · #${config.count} · ${aspectRatioDisplayLabel(config.aspectRatio)} · ${config.resolution}`;
         })
         .join(" | ")
       : "No model selected";
@@ -707,6 +824,74 @@ export function GlobalGeneratePanel() {
   }, [modelConfigs, selectedModels, selectedProjectName]);
   const toolsCanCollapse = isMobileViewport;
   const toolsPanelCollapsed = toolsCanCollapse ? toolsCollapsed : false;
+
+  const clearModelMenuCloseTimeout = () => {
+    if (modelMenuCloseTimeoutRef.current === null) return;
+    window.clearTimeout(modelMenuCloseTimeoutRef.current);
+    modelMenuCloseTimeoutRef.current = null;
+  };
+
+  const openModelMenu = () => {
+    clearModelMenuCloseTimeout();
+    setModelMenuClosing(false);
+    setModelMenuOpen(true);
+  };
+
+  const closeModelMenu = () => {
+    if (!modelMenuOpen && !modelMenuClosing) return;
+    clearModelMenuCloseTimeout();
+    setModelMenuOpen(false);
+    setModelMenuClosing(true);
+    modelMenuCloseTimeoutRef.current = window.setTimeout(() => {
+      setModelMenuClosing(false);
+      modelMenuCloseTimeoutRef.current = null;
+    }, MODEL_MENU_ANIMATION_MS);
+  };
+
+  const clearInlineMenuCloseTimeout = (menuId: string) => {
+    const timeoutId = inlineMenuCloseTimeoutsRef.current[menuId];
+    if (typeof timeoutId !== "number") return;
+    window.clearTimeout(timeoutId);
+    delete inlineMenuCloseTimeoutsRef.current[menuId];
+  };
+
+  const closeInlineMenu = (menuId: string) => {
+    if (openInlineMenuId !== menuId && !closingInlineMenuIds[menuId]) return;
+    clearInlineMenuCloseTimeout(menuId);
+    setOpenInlineMenuId((prev) => (prev === menuId ? null : prev));
+    setClosingInlineMenuIds((prev) => ({ ...prev, [menuId]: true }));
+    inlineMenuCloseTimeoutsRef.current[menuId] = window.setTimeout(() => {
+      setClosingInlineMenuIds((prev) => {
+        const next = { ...prev };
+        delete next[menuId];
+        return next;
+      });
+      delete inlineMenuCloseTimeoutsRef.current[menuId];
+    }, INLINE_MENU_ANIMATION_MS);
+  };
+
+  const openInlineMenu = (menuId: string) => {
+    if (openInlineMenuId && openInlineMenuId !== menuId) {
+      closeInlineMenu(openInlineMenuId);
+    }
+    clearInlineMenuCloseTimeout(menuId);
+    setClosingInlineMenuIds((prev) => {
+      if (!prev[menuId]) return prev;
+      const next = { ...prev };
+      delete next[menuId];
+      return next;
+    });
+    setOpenInlineMenuId(menuId);
+    closeModelMenu();
+  };
+
+  const toggleInlineMenu = (menuId: string) => {
+    if (openInlineMenuId === menuId) {
+      closeInlineMenu(menuId);
+      return;
+    }
+    openInlineMenu(menuId);
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -778,11 +963,11 @@ export function GlobalGeneratePanel() {
     suppressProjectScopedPersistRef.current = true;
     const storedSettings = selectedProjectId ? settingsByProjectRef.current[selectedProjectId] : undefined;
     const nextModelKey = storedSettings?.modelKey ?? DEFAULT_MODEL_KEY;
-    const nextSelectedModelKeys = [nextModelKey];
+    const nextSelectedModelKeys = normalizeSelectedModelKeys(storedSettings?.selectedModelKeys ?? [nextModelKey]);
     const nextModelConfigs = storedSettings?.modelConfigs ?? defaultModelConfigs();
     const nextPrompt = selectedProjectId ? (promptByProjectRef.current[selectedProjectId] ?? "") : "";
     const nextRefs = selectedProjectId ? (refsByProjectRef.current[selectedProjectId] ?? []) : [];
-    setModelKey(nextModelKey);
+    setActiveModelKey(nextModelKey);
     setSelectedModelKeys(nextSelectedModelKeys);
     setModelConfigs(nextModelConfigs);
     setPanelState((prev) => ({
@@ -872,14 +1057,14 @@ export function GlobalGeneratePanel() {
 
   useEffect(() => {
     function onReferenceEvent(event: Event): void {
-      const custom = event as CustomEvent<{ id: string; name: string; dataUrl: string }>;
+      const custom = event as CustomEvent<{ id: string; name: string; dataUrl: string; sourceUrl?: string }>;
       const payload = custom.detail;
       if (!payload || !payload.dataUrl) return;
       if (!supportsReferenceImages) {
         setPanelState((prev) => ({ ...prev, error: "Selected model does not support reference images." }));
         return;
       }
-      void addReferenceEntries([{ id: payload.id, name: payload.name, dataUrl: payload.dataUrl }]);
+      void addReferenceEntries([{ id: payload.id, name: payload.name, dataUrl: payload.dataUrl, sourceUrl: payload.sourceUrl }]);
     }
     window.addEventListener("aidrive:add-reference", onReferenceEvent as EventListener);
     return () => window.removeEventListener("aidrive:add-reference", onReferenceEvent as EventListener);
@@ -887,18 +1072,29 @@ export function GlobalGeneratePanel() {
 
   useEffect(() => {
     function handleOutsidePointerDown(event: MouseEvent): void {
-      const menu = projectMenuRef.current;
-      if (!menu?.open) return;
-      const target = event.target as Node | null;
-      if (target && menu.contains(target)) return;
-      menu.open = false;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".model-picker, .project-picker, .inline-picker")) return;
+      closeModelMenu();
+      if (openInlineMenuId) {
+        closeInlineMenu(openInlineMenuId);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent): void {
+      if (event.key !== "Escape") return;
+      closeModelMenu();
+      if (openInlineMenuId) {
+        closeInlineMenu(openInlineMenuId);
+      }
     }
 
     document.addEventListener("mousedown", handleOutsidePointerDown);
+    document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("mousedown", handleOutsidePointerDown);
+      document.removeEventListener("keydown", handleEscape);
     };
-  }, []);
+  }, [closeInlineMenu, closeModelMenu, openInlineMenuId]);
 
   const canSubmit = panelState.canSubmit && selectedModels.length > 0;
 
@@ -906,8 +1102,11 @@ export function GlobalGeneratePanel() {
     if (!toolsCanCollapse) return;
     setToolsCollapsed((value) => {
       const next = !value;
-      if (next && projectMenuRef.current) {
-        projectMenuRef.current.open = false;
+      if (next) {
+        closeModelMenu();
+        if (openInlineMenuId) {
+          closeInlineMenu(openInlineMenuId);
+        }
       }
       return next;
     });
@@ -948,6 +1147,12 @@ export function GlobalGeneratePanel() {
       if (keyboardPressTimeoutRef.current !== null) {
         window.clearTimeout(keyboardPressTimeoutRef.current);
       }
+      if (modelMenuCloseTimeoutRef.current !== null) {
+        window.clearTimeout(modelMenuCloseTimeoutRef.current);
+      }
+      const timeoutIds = Object.values(inlineMenuCloseTimeoutsRef.current);
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      inlineMenuCloseTimeoutsRef.current = {};
     };
   }, []);
 
@@ -1108,7 +1313,8 @@ export function GlobalGeneratePanel() {
         refs.push({
           id: createClientRequestId(),
           name: asset.name || `asset-${asset.id}`,
-          dataUrl
+          dataUrl,
+          sourceUrl: toAbsoluteHttpUrl(url) ?? undefined
         });
       }
     }
@@ -1125,7 +1331,8 @@ export function GlobalGeneratePanel() {
       refs.push({
         id: createClientRequestId(),
         name: "dropped-image",
-        dataUrl
+        dataUrl,
+        sourceUrl: toAbsoluteHttpUrl(url) ?? undefined
       });
     }
 
@@ -1133,7 +1340,7 @@ export function GlobalGeneratePanel() {
   }
 
   function onChooseModel(value: ModelKey): void {
-    setModelKey(value);
+    setActiveModelKey(value);
     setSelectedModelKeys((prev) => {
       if (prev.includes(value)) return prev;
       return [...prev, value];
@@ -1143,7 +1350,7 @@ export function GlobalGeneratePanel() {
       const found = MODEL_OPTIONS.find((item) => item.key === value);
       return {
         ...prev,
-        [value]: { count: 1, aspectRatio: "1:1", resolution: found?.resolutions[0] ?? "1K" }
+        [value]: { count: 1, aspectRatio: defaultAspectRatioForModel(value), resolution: found?.resolutions[0] ?? "1K" }
       };
     });
   }
@@ -1153,7 +1360,22 @@ export function GlobalGeneratePanel() {
       if (prev.length <= 1) return prev;
       const next = prev.filter((key) => key !== value);
       if (!next.includes(modelKey)) {
-        setModelKey(next[0]);
+        setActiveModelKey(next[0]);
+      }
+      return next;
+    });
+  }
+
+  function toggleModelSelection(value: ModelKey): void {
+    setSelectedModelKeys((prev) => {
+      if (!prev.includes(value)) {
+        setActiveModelKey(value);
+        return [...prev, value];
+      }
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((key) => key !== value);
+      if (activeModelKeyRef.current === value) {
+        setActiveModelKey(next[0]);
       }
       return next;
     });
@@ -1245,8 +1467,10 @@ export function GlobalGeneratePanel() {
       eventName: string,
       severity: "WARN" | "HIGH",
       message: string,
-      context: Record<string, unknown>
+      context: Record<string, unknown>,
+      modelOverride?: ModelKey
     ): void => {
+      const diagnosticModelKey = modelOverride ?? activeModelKeyRef.current;
       void postClientDiagnostic({
         severity,
         category: "GENERATION",
@@ -1257,8 +1481,8 @@ export function GlobalGeneratePanel() {
         traceId: submitTraceId,
         context: {
           projectId: activeProjectId,
-          model: modelKey,
-          requestedCount: modelConfigs[modelKey]?.count ?? 1,
+          model: diagnosticModelKey,
+          requestedCount: modelConfigs[diagnosticModelKey]?.count ?? 1,
           ...context
         }
       });
@@ -1267,13 +1491,35 @@ export function GlobalGeneratePanel() {
     try {
       let failureCount = 0;
       let fallbackWithoutReferencesCount = 0;
+      const fallbackWithoutReferencesByModel: Record<string, number> = {};
       const requests: Array<{ optimisticId: string; payload: GenerationJob["request"] }> = [];
-      const selected = MODEL_OPTIONS.find((item) => item.key === modelKey) ?? MODEL_OPTIONS[0];
-      const config = modelConfigs[selected.key] ?? {
-        count: 1,
-        aspectRatio: "1:1",
-        resolution: selected.resolutions[0]
-      };
+      const selectedKeysForSubmit = normalizeSelectedModelKeys(selectedModelKeys);
+      const modelsToSubmit = selectedKeysForSubmit
+        .map((key) => MODEL_OPTIONS.find((item) => item.key === key))
+        .filter((item): item is (typeof MODEL_OPTIONS)[number] => Boolean(item));
+      if (modelsToSubmit.length === 0) {
+        setPanelState((prev) => ({ ...prev, error: "Choose at least one model." }));
+        return;
+      }
+      const perModelRequestedCounts = Object.fromEntries(
+        modelsToSubmit.map((selected) => {
+          const config = modelConfigs[selected.key] ?? {
+            count: 1,
+            aspectRatio: defaultAspectRatioForModel(selected.key),
+            resolution: selected.resolutions[0]
+          };
+          return [selected.key, config.count];
+        })
+      );
+      emitSubmitDiagnostic(
+        "generation.submit.multi_model_selection",
+        "WARN",
+        "Submitting with selected models",
+        {
+          selectedModelKeys: modelsToSubmit.map((item) => item.key),
+          perModelRequestedCounts
+        }
+      );
       const submitNotes: string[] = [];
       const submitReferences = await selectSubmitReferenceImages(submitSourceReferences, referenceBudget);
       let referencesForSubmit = submitReferences.accepted;
@@ -1296,27 +1542,36 @@ export function GlobalGeneratePanel() {
           }
         );
       }
-      const payloadEstimateBase: GenerationJob["request"] = {
-        folderId: panelState.targetProjectId,
-        prompt: panelState.prompt.trim(),
-        model: selected.apiModel,
-        type: panelState.type,
-        settings: {
-          quality: config.resolution,
-          resolution: config.resolution,
-          aspectRatio: config.aspectRatio,
-          [GENERATION_CLIENT_REQUEST_ID_KEY]: "estimate-only"
-        }
-      };
       const referencesBeforeBudget = referencesForSubmit;
       const budgetedReferences = await shrinkReferencesForPayloadBudget({
         images: referencesForSubmit,
         maxBodyBytes: referenceBudget.safeGenerationBodyBytes,
-        estimateBodyBytes: (images) =>
-          estimateGenerationBodyBytes({
-            ...payloadEstimateBase,
-            settings: withReferenceSettings(payloadEstimateBase.settings, images)
-          })
+        estimateBodyBytes: (images) => {
+          const estimates = modelsToSubmit.map((selected) => {
+          const config = modelConfigs[selected.key] ?? {
+            count: 1,
+            aspectRatio: defaultAspectRatioForModel(selected.key),
+            resolution: selected.resolutions[0]
+          };
+            const payloadEstimateBase: GenerationJob["request"] = {
+              folderId: panelState.targetProjectId ?? activeProjectId,
+              prompt: panelState.prompt.trim(),
+              model: selected.apiModel,
+              type: panelState.type,
+              settings: {
+                quality: config.resolution,
+                resolution: config.resolution,
+                aspectRatio: config.aspectRatio,
+                [GENERATION_CLIENT_REQUEST_ID_KEY]: "estimate-only"
+              }
+            };
+            return estimateGenerationBodyBytes({
+              ...payloadEstimateBase,
+              settings: withReferenceSettings(payloadEstimateBase.settings, images, selected.apiModel)
+            });
+          });
+          return Math.max(...estimates);
+        }
       });
       const referencesChangedByBudget =
         budgetedReferences.references.length !== referencesBeforeBudget.length ||
@@ -1370,25 +1625,81 @@ export function GlobalGeneratePanel() {
       if (submitNotes.length > 0) {
         setPanelState((prev) => ({ ...prev, error: submitNotes.join(" ") }));
       }
-
-      const count = config.count;
-      for (let n = 0; n < count; n += 1) {
-        const clientRequestId = createClientRequestId();
-        const baseSettings: GenerationJob["request"]["settings"] = {
-          quality: config.resolution,
-          resolution: config.resolution,
-          aspectRatio: config.aspectRatio,
-          [GENERATION_CLIENT_REQUEST_ID_KEY]: clientRequestId
+      const perModelTrimmedReferences: Record<string, { used: number; available: number; limit: number }> = {};
+      let inferredSourceAspectRatio: number | null = null;
+      if (referencesForSubmit.length > 0) {
+        const firstReference = referencesForSubmit[0];
+        const ratioImage = await new Promise<HTMLImageElement | null>((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => resolve(null);
+          image.src = firstReference.dataUrl;
+        });
+        if (ratioImage) {
+          const width = ratioImage.naturalWidth || ratioImage.width;
+          const height = ratioImage.naturalHeight || ratioImage.height;
+          if (width > 0 && height > 0) {
+            inferredSourceAspectRatio = width / height;
+          }
+        }
+      }
+      for (const selected of modelsToSubmit) {
+        const config = modelConfigs[selected.key] ?? {
+          count: 1,
+          aspectRatio: defaultAspectRatioForModel(selected.key),
+          resolution: selected.resolutions[0]
         };
-        const payload: GenerationJob["request"] = {
-          folderId: activeProjectId,
-          prompt: panelState.prompt.trim(),
-          model: selected.apiModel,
-          type: panelState.type,
-          settings: withReferenceSettings(baseSettings, referencesForSubmit)
-        };
-        const optimisticId = addOptimisticGenerationJob(payload);
-        requests.push({ optimisticId, payload });
+        const resolvedAspectRatio = config.aspectRatio === ASPECT_RATIO_AUTO
+          ? closestAspectRatioForValue(
+            inferredSourceAspectRatio ?? 1,
+            selected.key === "a2e" ? A2E_SUPPORTED_ASPECT_RATIOS : ASPECT_RATIOS
+          )
+          : config.aspectRatio;
+        const modelReferences = referencesForSubmit.slice(0, selected.maxReferenceImages);
+        if (modelReferences.length < referencesForSubmit.length) {
+          perModelTrimmedReferences[selected.key] = {
+            used: modelReferences.length,
+            available: referencesForSubmit.length,
+            limit: selected.maxReferenceImages
+          };
+        }
+        for (let n = 0; n < config.count; n += 1) {
+          const clientRequestId = createClientRequestId();
+          const baseSettings: GenerationJob["request"]["settings"] = {
+            quality: config.resolution,
+            resolution: config.resolution,
+            aspectRatio: resolvedAspectRatio,
+            [GENERATION_CLIENT_REQUEST_ID_KEY]: clientRequestId
+          };
+          const payload: GenerationJob["request"] = {
+            folderId: activeProjectId,
+            prompt: panelState.prompt.trim(),
+            model: selected.apiModel,
+            type: panelState.type,
+            settings: withReferenceSettings(baseSettings, modelReferences, selected.apiModel)
+          };
+          const optimisticId = addOptimisticGenerationJob(payload);
+          requests.push({ optimisticId, payload });
+        }
+      }
+      if (Object.keys(perModelTrimmedReferences).length > 0) {
+        const trimmedNotes = Object.entries(perModelTrimmedReferences).map(([key, info]) => {
+          const selected = MODEL_OPTIONS.find((item) => item.key === key);
+          const label = selected?.label ?? key;
+          return `${label} submitted with first ${info.used} reference${info.used === 1 ? "" : "s"} (model limit).`;
+        });
+        setPanelState((prev) => ({
+          ...prev,
+          error: [prev.error, ...trimmedNotes].filter(Boolean).join(" ").trim() || null
+        }));
+        emitSubmitDiagnostic(
+          "generation.submit.references_trimmed_per_model",
+          "WARN",
+          "Reference images trimmed per model capability limits",
+          {
+            trimmedByModel: perModelTrimmedReferences
+          }
+        );
       }
 
       const results = await Promise.allSettled(
@@ -1405,7 +1716,10 @@ export function GlobalGeneratePanel() {
           } catch (error) {
             const errorText = error instanceof Error ? error.message : String(error);
             const friendly = parseApiErrorMessage(errorText) ?? errorText;
-            if (referencesForSubmit.length > 0 && /payload too large/i.test(friendly)) {
+            const hasReferencesInPayload = Object.keys(payload.settings).some((key) => key.startsWith("referenceImageDataUrl"));
+            const shouldRetryWithoutReferences = hasReferencesInPayload
+              && (/payload too large/i.test(friendly) || isLikelyNetworkSubmitFailure(friendly));
+            if (shouldRetryWithoutReferences) {
               const retryPayload: GenerationJob["request"] = {
                 ...payload,
                 settings: withoutReferenceSettings(payload.settings)
@@ -1418,6 +1732,7 @@ export function GlobalGeneratePanel() {
                 })
               });
               fallbackWithoutReferencesCount += 1;
+              fallbackWithoutReferencesByModel[payload.model] = (fallbackWithoutReferencesByModel[payload.model] ?? 0) + 1;
               reconcileOptimisticGenerationJob(optimisticId, retryResult.job);
               return;
             }
@@ -1437,6 +1752,9 @@ export function GlobalGeneratePanel() {
           .map((reason) => (reason instanceof Error ? reason.message : String(reason)));
         const firstReason = failedReasons[0]?.trim();
         const friendlyReason = parseApiErrorMessage(firstReason) ?? firstReason;
+        const networkHint = isLikelyNetworkSubmitFailure(friendlyReason)
+          ? " Mobile upload failed before the API received the request. Try fewer/smaller references or submit without references."
+          : "";
         emitSubmitDiagnostic(
           "generation.submit.failed",
           "HIGH",
@@ -1445,15 +1763,17 @@ export function GlobalGeneratePanel() {
             failureCount,
             requestCount: requests.length,
             fallbackWithoutReferencesCount,
+            fallbackWithoutReferencesByModel,
+            selectedModelKeys: modelsToSubmit.map((item) => item.key),
             firstError: friendlyReason ?? null
           }
         );
-        const targetFolder = folders.find((folder) => folder.id === panelState.targetProjectId);
+        const targetFolder = folders.find((folder) => folder.id === activeProjectId);
         pushNotification({
           kind: "SUBMIT_FAILED",
           title: `${failureCount} request${failureCount > 1 ? "s" : ""} failed to submit`,
           message: friendlyReason
-            ? `${friendlyReason}${targetFolder ? ` (${targetFolder.name})` : ""}`
+            ? `${friendlyReason}${networkHint}${targetFolder ? ` (${targetFolder.name})` : ""}`
             : `Submission failed${targetFolder ? ` in ${targetFolder.name}` : ""}.`,
           folderId: activeProjectId,
           jobId: null
@@ -1461,7 +1781,7 @@ export function GlobalGeneratePanel() {
         setPanelState((prev) => ({
           ...prev,
           error: friendlyReason
-            ? `Submit failed: ${friendlyReason}`
+            ? `Submit failed: ${friendlyReason}${networkHint}`
             : `${failureCount} generation request${failureCount > 1 ? "s" : ""} failed to submit.`
         }));
       } else if (fallbackWithoutReferencesCount > 0) {
@@ -1471,7 +1791,9 @@ export function GlobalGeneratePanel() {
           "Generation submit retried without references due payload limits",
           {
             fallbackWithoutReferencesCount,
-            requestCount: requests.length
+            requestCount: requests.length,
+            fallbackWithoutReferencesByModel,
+            selectedModelKeys: modelsToSubmit.map((item) => item.key)
           }
         );
         setPanelState((prev) => ({
@@ -1578,91 +1900,183 @@ export function GlobalGeneratePanel() {
             aria-hidden={toolsPanelCollapsed}
           >
             <div className="dock-controls">
-              <select className="dock-chip" value={modelKey} onChange={(e) => onChooseModel(e.target.value as ModelKey)}>
-                {MODEL_OPTIONS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-              </select>
+              <div className={`model-picker ${modelMenuOpen ? "open" : ""} ${modelMenuClosing ? "closing" : ""}`} ref={modelMenuRef}>
+                <button
+                  className="model-picker-summary"
+                  type="button"
+                  aria-expanded={modelMenuOpen}
+                  aria-controls="generate-model-picker-menu"
+                  onClick={() => {
+                    if (modelMenuOpen) {
+                      closeModelMenu();
+                      return;
+                    }
+                    if (openInlineMenuId) {
+                      closeInlineMenu(openInlineMenuId);
+                    }
+                    openModelMenu();
+                  }}
+                >
+                  <span className="model-picker-label">Choose</span>
+                  <span className="model-picker-value">Model</span>
+                </button>
+                <div className="model-picker-menu" id="generate-model-picker-menu" aria-hidden={!modelMenuOpen}>
+                  {MODEL_OPTIONS.map((item) => (
+                    <button
+                      className={`model-picker-item ${selectedModelKeys.includes(item.key) ? "active" : ""}`}
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        toggleModelSelection(item.key);
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="dock-selected-models">
-                {selectedModels.map((item) => (
-                  <div className="dock-model-pill" key={item.key}>
+                {selectedModels.map((item) => {
+                  const countMenuId = `${item.key}-count-menu`;
+                  const ratioMenuId = `${item.key}-ratio-menu`;
+                  const resolutionMenuId = `${item.key}-resolution-menu`;
+                  return <div className="dock-model-pill" key={item.key}>
                     <div className="dock-model-pill-head">
                       <span className="dock-model-pill-icon">✦</span>
                       <span>{item.label}</span>
                     </div>
                     <div className="dock-model-pill-controls">
-                      <label className="dock-model-pill-control">
+                      <div className="dock-model-pill-control">
                         <span>#</span>
-                        <select
-                          className="dock-chip dock-model-pill-select"
-                          value={modelConfigs[item.key]?.count ?? 1}
-                          onChange={(e) =>
-                            setModelConfigs((prev) => ({
-                              ...prev,
-                              [item.key]: { ...prev[item.key], count: Number(e.target.value) }
-                            }))
-                          }
-                        >
-                          {IMAGE_COUNT_OPTIONS.map((count) => (
-                            <option key={count} value={count}>{count}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="dock-model-pill-control">
+                        <div className={`inline-picker inline-picker-compact ${openInlineMenuId === countMenuId ? "open" : ""} ${closingInlineMenuIds[countMenuId] ? "closing" : ""}`}>
+                          <button
+                            className="inline-picker-summary"
+                            type="button"
+                            aria-expanded={openInlineMenuId === countMenuId}
+                            aria-controls={countMenuId}
+                            onClick={() => toggleInlineMenu(countMenuId)}
+                          >
+                            <span className="inline-picker-value">{modelConfigs[item.key]?.count ?? 1}</span>
+                          </button>
+                          <div className="inline-picker-menu" id={countMenuId} aria-hidden={openInlineMenuId !== countMenuId}>
+                            {IMAGE_COUNT_OPTIONS.map((count) => (
+                              <button
+                                className={`inline-picker-item ${(modelConfigs[item.key]?.count ?? 1) === count ? "active" : ""}`}
+                                key={count}
+                                type="button"
+                                onClick={() => {
+                                  setModelConfigs((prev) => ({
+                                    ...prev,
+                                    [item.key]: { ...prev[item.key], count }
+                                  }));
+                                  closeInlineMenu(countMenuId);
+                                }}
+                              >
+                                {count}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="dock-model-pill-control">
                         <span>AR</span>
-                        <select
-                          className="dock-chip dock-model-pill-select"
-                          value={modelConfigs[item.key]?.aspectRatio ?? "1:1"}
-                          onChange={(e) =>
-                            setModelConfigs((prev) => ({
-                              ...prev,
-                              [item.key]: { ...prev[item.key], aspectRatio: e.target.value }
-                            }))
-                          }
-                        >
-                      {ASPECT_RATIOS.map((ratio) => (
-                        <option key={ratio} value={ratio}>
-                          {aspectRatioDisplayLabel(ratio)}
-                        </option>
-                      ))}
-                        </select>
-                      </label>
-                      <label className="dock-model-pill-control">
+                        <div className={`inline-picker ${openInlineMenuId === ratioMenuId ? "open" : ""} ${closingInlineMenuIds[ratioMenuId] ? "closing" : ""}`}>
+                          <button
+                            className="inline-picker-summary"
+                            type="button"
+                            aria-expanded={openInlineMenuId === ratioMenuId}
+                            aria-controls={ratioMenuId}
+                            onClick={() => toggleInlineMenu(ratioMenuId)}
+                          >
+                            <span className="inline-picker-value inline-picker-value-ratio">
+                              <span className={aspectRatioShapeClassName(modelConfigs[item.key]?.aspectRatio ?? defaultAspectRatioForModel(item.key))} style={aspectRatioShapeStyle(modelConfigs[item.key]?.aspectRatio ?? defaultAspectRatioForModel(item.key))} />
+                              <span>{aspectRatioDisplayLabel(modelConfigs[item.key]?.aspectRatio ?? defaultAspectRatioForModel(item.key))}</span>
+                            </span>
+                          </button>
+                          <div className="inline-picker-menu" id={ratioMenuId} aria-hidden={openInlineMenuId !== ratioMenuId}>
+                            {aspectRatioOptionsForModel(item.key).map((ratio) => (
+                              <button
+                                className={`inline-picker-item ${(modelConfigs[item.key]?.aspectRatio ?? defaultAspectRatioForModel(item.key)) === ratio ? "active" : ""}`}
+                                key={ratio}
+                                type="button"
+                                onClick={() => {
+                                  setModelConfigs((prev) => ({
+                                    ...prev,
+                                    [item.key]: { ...prev[item.key], aspectRatio: ratio }
+                                  }));
+                                  closeInlineMenu(ratioMenuId);
+                                }}
+                              >
+                                <span className="aspect-ratio-option">
+                                  <span className={aspectRatioShapeClassName(ratio)} style={aspectRatioShapeStyle(ratio)} />
+                                  <span>{aspectRatioDisplayLabel(ratio)}</span>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="dock-model-pill-control">
                         <span>Res</span>
-                        <select
-                          className="dock-chip dock-model-pill-select"
-                          value={modelConfigs[item.key]?.resolution ?? item.resolutions[0]}
-                          onChange={(e) =>
-                            setModelConfigs((prev) => ({
-                              ...prev,
-                              [item.key]: { ...prev[item.key], resolution: e.target.value }
-                            }))
-                          }
-                        >
-                          {item.resolutions.map((res) => <option key={res} value={res}>{res}</option>)}
-                        </select>
-                      </label>
+                        <div className={`inline-picker inline-picker-compact ${openInlineMenuId === resolutionMenuId ? "open" : ""} ${closingInlineMenuIds[resolutionMenuId] ? "closing" : ""}`}>
+                          <button
+                            className="inline-picker-summary"
+                            type="button"
+                            aria-expanded={openInlineMenuId === resolutionMenuId}
+                            aria-controls={resolutionMenuId}
+                            onClick={() => toggleInlineMenu(resolutionMenuId)}
+                          >
+                            <span className="inline-picker-value">{modelConfigs[item.key]?.resolution ?? item.resolutions[0]}</span>
+                          </button>
+                          <div className="inline-picker-menu" id={resolutionMenuId} aria-hidden={openInlineMenuId !== resolutionMenuId}>
+                            {item.resolutions.map((res) => (
+                              <button
+                                className={`inline-picker-item ${(modelConfigs[item.key]?.resolution ?? item.resolutions[0]) === res ? "active" : ""}`}
+                                key={res}
+                                type="button"
+                                onClick={() => {
+                                  setModelConfigs((prev) => ({
+                                    ...prev,
+                                    [item.key]: { ...prev[item.key], resolution: res }
+                                  }));
+                                  closeInlineMenu(resolutionMenuId);
+                                }}
+                              >
+                                {res}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     {selectedModelKeys.length > 1 ? (
                       <button className="dock-model-pill-remove-btn" type="button" onClick={() => removeModel(item.key)}>
                         ×
                       </button>
                     ) : null}
-                  </div>
-                ))}
+                  </div>;
+                })}
               </div>
 
-              <details className="project-picker" ref={projectMenuRef}>
-                <summary className="project-picker-summary">
+              <div className={`project-picker ${openInlineMenuId === "project-menu" ? "open" : ""} ${closingInlineMenuIds["project-menu"] ? "closing" : ""}`}>
+                <button
+                  className="project-picker-summary"
+                  type="button"
+                  aria-expanded={openInlineMenuId === "project-menu"}
+                  aria-controls="project-menu"
+                  onClick={() => toggleInlineMenu("project-menu")}
+                >
                   <span className="project-picker-label">Project</span>
                   <span className="project-picker-value">{selectedProjectName ?? "Select a project"}</span>
-                </summary>
-                <div className="project-picker-menu">
+                </button>
+                <div className="project-picker-menu" id="project-menu" aria-hidden={openInlineMenuId !== "project-menu"}>
                   <button
                     className="project-picker-item add"
                     type="button"
                     onClick={() => {
                       setCreateModalOpen(true);
-                      if (projectMenuRef.current) projectMenuRef.current.open = false;
+                      closeInlineMenu("project-menu");
                     }}
                   >
                     + Add Project
@@ -1675,14 +2089,14 @@ export function GlobalGeneratePanel() {
                       onClick={() => {
                         selectProject(folder.id);
                         setPanelState((prev) => ({ ...prev, targetProjectId: folder.id, canSubmit: Boolean(prev.prompt.trim()) }));
-                        if (projectMenuRef.current) projectMenuRef.current.open = false;
+                        closeInlineMenu("project-menu");
                       }}
                     >
                       {folder.name}
                     </button>
                   ))}
                 </div>
-              </details>
+              </div>
             </div>
           </div>
         </div>

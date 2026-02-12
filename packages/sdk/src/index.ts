@@ -127,4 +127,36 @@ export class ApiClient {
   getDiagnosticIncidentPrompts(incidentId: string): Promise<{ prompts: DiagnosticIncidentPrompts }> {
     return this.getIncidentPrompts(incidentId);
   }
+
+  submitDiagnosticAgentReport(
+    incidentId: string,
+    payload: {
+      agentId?: string | null;
+      reportText?: string;
+      tools?: Array<{
+        tool: string;
+        endpoint?: string;
+        purpose?: string;
+        outcome: string;
+        helpfulnessScore?: number;
+        improvementSuggestion?: string;
+        autoImproved?: boolean;
+        deferred?: boolean;
+        deferNote?: string;
+      }>;
+      diagnosticsEvidenceComplete?: boolean;
+    }
+  ): Promise<{
+    accepted: boolean;
+    incidentId: string;
+    toolCount: number;
+    usedEvents: number;
+    feedbackEvents: number;
+    diagnosticsEvidenceComplete: boolean | null;
+  }> {
+    return this.request(`/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/agent-report`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
 }

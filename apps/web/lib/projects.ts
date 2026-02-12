@@ -156,6 +156,15 @@ export function writeStoredTargetProjectId(projectId: string): void {
   }
 }
 
+export function clearStoredTargetProjectId(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(TARGET_PROJECT_STORAGE_KEY);
+  } catch {
+    // Ignore storage write failures in restricted/private browser modes.
+  }
+}
+
 export function pickDefaultProjectId(folders: Folder[], preferredId?: string | null): string | null {
   if (folders.length === 0) return null;
 
@@ -178,6 +187,69 @@ export function sortAssetsNewestFirst(assets: Asset[]): Asset[] {
     const bt = b.createdAt ? Date.parse(b.createdAt) : 0;
     return bt - at;
   });
+}
+
+export function isSuccessfulGeneratedImageAsset(asset: Asset): boolean {
+  if (!asset.mimeType.toLowerCase().startsWith("image/")) return false;
+  const tags = new Set(asset.tags.map((tag) => tag.toLowerCase()));
+  const hasGenerationTag = tags.has("generated") || asset.tags.some((tag) => tag.toLowerCase().startsWith("job:"));
+  if (!hasGenerationTag) return false;
+  if (tags.has("failed") || tags.has("blocked")) return false;
+  return true;
+}
+
+export function isNonFailedImageAsset(asset: Asset): boolean {
+  if (!asset.mimeType.toLowerCase().startsWith("image/")) return false;
+  const tags = new Set(asset.tags.map((tag) => tag.toLowerCase()));
+  if (tags.has("failed") || tags.has("blocked")) return false;
+  return true;
+}
+
+export function latestSuccessfulGeneratedImageByFolderId(assets: Asset[]): Map<string, Asset> {
+  const latest = new Map<string, Asset>();
+  for (const asset of assets) {
+    if (!asset.folderId) continue;
+    if (!isSuccessfulGeneratedImageAsset(asset)) continue;
+    const current = latest.get(asset.folderId);
+    if (!current) {
+      latest.set(asset.folderId, asset);
+      continue;
+    }
+    const currentTime = current.createdAt ? Date.parse(current.createdAt) : 0;
+    const nextTime = asset.createdAt ? Date.parse(asset.createdAt) : 0;
+    if (nextTime >= currentTime) {
+      latest.set(asset.folderId, asset);
+    }
+  }
+  return latest;
+}
+
+export function latestNonFailedImageByFolderId(assets: Asset[]): Map<string, Asset> {
+  const latest = new Map<string, Asset>();
+  for (const asset of assets) {
+    if (!asset.folderId) continue;
+    if (!isNonFailedImageAsset(asset)) continue;
+    const current = latest.get(asset.folderId);
+    if (!current) {
+      latest.set(asset.folderId, asset);
+      continue;
+    }
+    const currentTime = current.createdAt ? Date.parse(current.createdAt) : 0;
+    const nextTime = asset.createdAt ? Date.parse(asset.createdAt) : 0;
+    if (nextTime >= currentTime) {
+      latest.set(asset.folderId, asset);
+    }
+  }
+  return latest;
+}
+
+export function latestPreferredFolderThumbnailById(assets: Asset[]): Map<string, Asset> {
+  const preferred = latestNonFailedImageByFolderId(assets);
+  const generated = latestSuccessfulGeneratedImageByFolderId(assets);
+  for (const [folderId, generatedAsset] of generated.entries()) {
+    preferred.set(folderId, generatedAsset);
+  }
+  return preferred;
 }
 
 export function normalizeCustomOrder(assets: Asset[], customOrder: string[] | undefined): string[] {

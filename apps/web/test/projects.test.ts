@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   SAMPLE_PROJECT_NAMES,
   buildProjectCards,
+  latestNonFailedImageByFolderId,
+  latestPreferredFolderThumbnailById,
+  isSuccessfulGeneratedImageAsset,
+  latestSuccessfulGeneratedImageByFolderId,
   normalizeCustomOrder,
   orderAssetsByCustom,
   pickDefaultProjectId
@@ -55,5 +59,120 @@ describe("projects helpers", () => {
     ];
     const ordered = orderAssetsByCustom(assets, ["c", "a", "b"]);
     expect(ordered.map((item) => item.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("accepts only successful generated images for project thumbnails", () => {
+    expect(
+      isSuccessfulGeneratedImageAsset({
+        id: "ok",
+        name: "ok.png",
+        mimeType: "image/png",
+        folderId: "f1",
+        tags: ["generated", "model:gemini"]
+      })
+    ).toBe(true);
+
+    expect(
+      isSuccessfulGeneratedImageAsset({
+        id: "fail",
+        name: "fail.png",
+        mimeType: "image/png",
+        folderId: "f1",
+        tags: ["generated", "failed"]
+      })
+    ).toBe(false);
+
+    expect(
+      isSuccessfulGeneratedImageAsset({
+        id: "upload",
+        name: "upload.png",
+        mimeType: "image/png",
+        folderId: "f1",
+        tags: []
+      })
+    ).toBe(false);
+  });
+
+  it("picks latest successful generated image per folder", () => {
+    const latest = latestSuccessfulGeneratedImageByFolderId([
+      {
+        id: "older-success",
+        name: "older.png",
+        mimeType: "image/png",
+        folderId: "f1",
+        tags: ["generated"],
+        createdAt: "2026-02-01T00:00:00.000Z"
+      },
+      {
+        id: "newer-failed",
+        name: "failed.png",
+        mimeType: "image/png",
+        folderId: "f1",
+        tags: ["generated", "failed"],
+        createdAt: "2026-02-02T00:00:00.000Z"
+      },
+      {
+        id: "latest-success",
+        name: "latest.png",
+        mimeType: "image/png",
+        folderId: "f1",
+        tags: ["generated", "nano banana"],
+        createdAt: "2026-02-03T00:00:00.000Z"
+      },
+      {
+        id: "video",
+        name: "clip.mp4",
+        mimeType: "video/mp4",
+        folderId: "f1",
+        tags: ["generated"],
+        createdAt: "2026-02-04T00:00:00.000Z"
+      }
+    ]);
+
+    expect(latest.get("f1")?.id).toBe("latest-success");
+  });
+
+  it("falls back to latest non-failed image when generated success is unavailable", () => {
+    const fallback = latestPreferredFolderThumbnailById([
+      {
+        id: "upload-latest",
+        name: "upload.png",
+        mimeType: "image/png",
+        folderId: "f2",
+        tags: [],
+        createdAt: "2026-02-03T00:00:00.000Z"
+      },
+      {
+        id: "failed-generated",
+        name: "failed.png",
+        mimeType: "image/png",
+        folderId: "f2",
+        tags: ["generated", "failed"],
+        createdAt: "2026-02-04T00:00:00.000Z"
+      }
+    ]);
+    expect(fallback.get("f2")?.id).toBe("upload-latest");
+  });
+
+  it("latestNonFailedImageByFolderId excludes blocked/failed images", () => {
+    const latest = latestNonFailedImageByFolderId([
+      {
+        id: "ok",
+        name: "ok.png",
+        mimeType: "image/png",
+        folderId: "f3",
+        tags: [],
+        createdAt: "2026-02-01T00:00:00.000Z"
+      },
+      {
+        id: "blocked",
+        name: "blocked.png",
+        mimeType: "image/png",
+        folderId: "f3",
+        tags: ["blocked"],
+        createdAt: "2026-02-02T00:00:00.000Z"
+      }
+    ]);
+    expect(latest.get("f3")?.id).toBe("ok");
   });
 });

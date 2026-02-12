@@ -7,6 +7,11 @@ import {
   buildIncidentPacket,
   patchDiagnosticIncidentStatus
 } from "../../lib/diagnostics/incident-engine.js";
+import {
+  parseAgentUsageReport,
+  toolFeedbackContext,
+  toolUsageContext
+} from "../../lib/diagnostics/agent-report.js";
 import { getDiagnosticIncidentById, listDiagnosticEvents, listDiagnosticIncidents } from "../../lib/diagnostics/store.js";
 import { TRACE_HEADER_NAME } from "../../lib/diagnostics/types.js";
 import { DomainError } from "../../lib/errors.js";
@@ -53,6 +58,25 @@ const ingestPayloadSchema = z.object({
   requestId: z.string().min(1).max(120).optional().nullable(),
   traceId: z.string().min(1).max(120).optional().nullable(),
   context: z.record(z.unknown()).optional()
+});
+
+const agentReportToolSchema = z.object({
+  tool: z.string().min(2).max(80),
+  endpoint: z.string().min(1).max(200).optional(),
+  purpose: z.string().min(1).max(200).optional(),
+  outcome: z.string().min(2).max(40),
+  helpfulnessScore: z.coerce.number().int().min(1).max(5).optional(),
+  improvementSuggestion: z.string().min(1).max(280).optional(),
+  autoImproved: z.boolean().optional(),
+  deferred: z.boolean().optional(),
+  deferNote: z.string().min(1).max(280).optional()
+});
+
+const agentReportSchema = z.object({
+  agentId: z.string().min(1).max(120).optional().nullable(),
+  reportText: z.string().min(1).max(20000).optional(),
+  tools: z.array(agentReportToolSchema).max(200).optional(),
+  diagnosticsEvidenceComplete: z.boolean().optional()
 });
 
 function headerToString(value: unknown): string | null {
@@ -131,6 +155,77 @@ export async function registerDiagnosticsRoutes(app: FastifyInstance): Promise<v
       return reply.status(404).send({ error: "Incident not found" });
     }
     return { packet };
+  });
+
+  app.post("/v1/diagnostics/incidents/:incidentId/agent-report", async (request, reply) => {
+    requireDiagnosticsAccess(app, request);
+    const { incidentId } = request.params as { incidentId: string };
+    const incident = getDiagnosticIncidentById(incidentId);
+    if (!incident) {
+      return reply.status(404).send({ error: "Incident not found" });
+    }
+
+    const body = agentReportSchema.parse(request.body ?? {});
+    const parsedFromText = body.reportText ? parseAgentUsageReport(body.reportText) : null;
+    const tools = body.tools ?? parsedFromText?.tools ?? [];
+    const evidenceComplete = typeof body.diagnosticsEvidenceComplete === "boolean"
+      ? body.diagnosticsEvidenceComplete
+      : (parsedFromText?.diagnosticsEvidenceComplete ?? null);
+    const agentId = body.agentId ?? null;
+
+    let usedEvents = 0;
+    let feedbackEvents = 0;
+    for (const tool of tools) {
+      const usedResult = app.ctx.diagnostics.emit({
+        severity: tool.outcome === "success" ? "INFO" : "WARN",
+        category: "CLIENT",
+        component: "agent.report",
+        eventName: "diagnostics.tool.used",
+        message: `Agent reported tool usage: ${tool.tool}`,
+        workspaceId: "ws_demo",
+        context: toolUsageContext(incidentId, tool, agentId)
+      });
+      if (usedResult?.event) usedEvents += 1;
+
+      if (typeof tool.helpfulnessScore === "number" || typeof tool.improvementSuggestion === "string") {
+        const feedbackResult = app.ctx.diagnostics.emit({
+          severity: (tool.helpfulnessScore ?? 0) >= 4 ? "INFO" : "WARN",
+          category: "CLIENT",
+          component: "agent.report",
+          eventName: "diagnostics.tool.feedback",
+          message: `Agent reported tool feedback: ${tool.tool}`,
+          workspaceId: "ws_demo",
+          context: toolFeedbackContext(incidentId, tool, agentId)
+        });
+        if (feedbackResult?.event) feedbackEvents += 1;
+      }
+    }
+
+    app.ctx.diagnostics.emit({
+      severity: evidenceComplete === false ? "WARN" : "INFO",
+      category: "SYSTEM",
+      component: "agent.report",
+      eventName: "diagnostics.agent.report",
+      message: "Agent diagnostics usage report ingested",
+      workspaceId: "ws_demo",
+      context: {
+        incidentId,
+        agentId,
+        toolCount: tools.length,
+        usedEvents,
+        feedbackEvents,
+        diagnosticsEvidenceComplete: evidenceComplete
+      }
+    });
+
+    return reply.code(202).send({
+      accepted: true,
+      incidentId,
+      toolCount: tools.length,
+      usedEvents,
+      feedbackEvents,
+      diagnosticsEvidenceComplete: evidenceComplete
+    });
   });
 
   app.get("/v1/diagnostics/incidents/:incidentId/prompts", async (request, reply) => {

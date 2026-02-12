@@ -12,6 +12,7 @@ const schema = z.object({
   KLING_API_KEY: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
   A2E_API_KEY: z.string().optional(),
+  A2E_API_BASE_URL: z.string().optional(),
   NANO_BANANA_API_KEY: z.string().optional(),
   AIDRIVE_DATA_DIR: z.string().optional()
 });

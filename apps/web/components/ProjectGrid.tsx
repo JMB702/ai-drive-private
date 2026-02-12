@@ -4,6 +4,8 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, use
 import { usePathname, useRouter } from "next/navigation";
 import {
   fallbackImagePreview,
+  isSuccessfulGeneratedImageAsset,
+  latestPreferredFolderThumbnailById,
   type ProjectThumbnailPreference,
   PROJECT_THUMBNAIL_PREFS_STORAGE_KEY,
   PROJECT_DRAG_IDS_MIME,
@@ -107,23 +109,7 @@ export function ProjectGrid() {
     return map;
   }, [folders]);
 
-  const latestAssetByProjectId = useMemo(() => {
-    const latest = new Map<string, (typeof assets)[number]>();
-    for (const asset of assets) {
-      if (!asset.folderId) continue;
-      const current = latest.get(asset.folderId);
-      if (!current) {
-        latest.set(asset.folderId, asset);
-        continue;
-      }
-      const currentTime = current.createdAt ? Date.parse(current.createdAt) : 0;
-      const nextTime = asset.createdAt ? Date.parse(asset.createdAt) : 0;
-      if (nextTime >= currentTime) {
-        latest.set(asset.folderId, asset);
-      }
-    }
-    return latest;
-  }, [assets]);
+  const latestAssetByProjectId = useMemo(() => latestPreferredFolderThumbnailById(assets), [assets]);
 
   const pickableAssets = useMemo(() => {
     const sorted = [...assets].sort((a, b) => {
@@ -225,7 +211,7 @@ export function ProjectGrid() {
     }
     if (pref?.mode === "asset" && pref.assetId) {
       const asset = assetById.get(pref.assetId);
-      if (asset) {
+      if (asset && isSuccessfulGeneratedImageAsset(asset)) {
         return {
           src: resolveAssetPreview(asset),
           cropY: clampCropY(pref.cropY ?? defaultCropForAsset(asset.aspectRatio))

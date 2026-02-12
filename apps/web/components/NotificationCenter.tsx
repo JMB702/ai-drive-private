@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useProjects } from "./ProjectsProvider";
 import { toDisplayPreviewUrl } from "../lib/projects";
 import { apiRequest } from "../lib/api";
-import { postClientDiagnostic } from "../lib/diagnostics-client";
 import {
   copyGenerationFailureReport,
   generationFailureCategoryLabel,
@@ -14,14 +13,7 @@ import {
 
 const NOTIFICATIONS_STORAGE_KEY = "aidrive:notifications";
 
-type IncidentPromptKind = "triage" | "fix" | "verify";
-type IncidentDiagnosticTool = "incident_packet" | "triage_prompt" | "fix_prompt" | "verify_prompt";
-
-type IncidentPromptsPayload = {
-  triage: string;
-  fix: string;
-  verify: string;
-};
+type NotificationFailureSeverity = "warning" | "critical" | null;
 
 function formatRelativeTime(iso: string): string {
   const deltaMs = Date.now() - Date.parse(iso);
@@ -63,33 +55,23 @@ function stringifyUnknown(value: unknown): string {
   }
 }
 
-function normalizeIncidentPrompts(input: unknown): IncidentPromptsPayload | null {
-  if (!input || typeof input !== "object") return null;
-  const raw = input as Partial<IncidentPromptsPayload>;
-  const triage = typeof raw.triage === "string" ? raw.triage.trim() : "";
-  const fix = typeof raw.fix === "string" ? raw.fix.trim() : "";
-  const verify = typeof raw.verify === "string" ? raw.verify.trim() : "";
-  if (!triage || !fix || !verify) return null;
-  return { triage, fix, verify };
-}
+function notificationFailureSeverity(
+  kind: string,
+  incidentSeverity: "INFO" | "WARN" | "HIGH" | "CRITICAL" | null | undefined,
+  failureCategory: string | null
+): NotificationFailureSeverity {
+  if (kind === "SYSTEM_INCIDENT") {
+    if (incidentSeverity === "CRITICAL" || incidentSeverity === "HIGH") return "critical";
+    if (incidentSeverity === "WARN") return "warning";
+    return null;
+  }
 
-function incidentPromptLabel(kind: IncidentPromptKind): string {
-  if (kind === "triage") return "Triage";
-  if (kind === "fix") return "Fix";
-  return "Verify";
-}
+  if (kind !== "GENERATION_FAILED" && kind !== "SUBMIT_FAILED") return null;
 
-function incidentPromptTool(kind: IncidentPromptKind): IncidentDiagnosticTool {
-  if (kind === "triage") return "triage_prompt";
-  if (kind === "fix") return "fix_prompt";
-  return "verify_prompt";
-}
-
-function incidentToolLabel(tool: IncidentDiagnosticTool): string {
-  if (tool === "incident_packet") return "Incident packet";
-  if (tool === "triage_prompt") return "Triage prompt";
-  if (tool === "fix_prompt") return "Fix prompt";
-  return "Verify prompt";
+  if (failureCategory === "SAFETY_BLOCK" || failureCategory === "CONTENT_POLICY") return "warning";
+  if (failureCategory === "API_RATE_LIMIT" || failureCategory === "API_TIMEOUT" || failureCategory === "NETWORK") return "warning";
+  if (failureCategory === "API_UNAVAILABLE") return "warning";
+  return "critical";
 }
 
 export function NotificationCenter() {
@@ -112,14 +94,12 @@ export function NotificationCenter() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [copyFeedbackByAction, setCopyFeedbackByAction] = useState<Record<string, string>>({});
   const [markAllFeedback, setMarkAllFeedback] = useState<string | null>(null);
   const [pushToasts, setPushToasts] = useState<Array<{ id: string; notificationId: string; kind: "GENERATION_SUCCEEDED" | "GENERATION_FAILED" | "SUBMIT_FAILED" }>>([]);
   const [bellRinging, setBellRinging] = useState(false);
   const [animatingNotificationIds, setAnimatingNotificationIds] = useState<Set<string>>(new Set());
   const [removingNotificationIds, setRemovingNotificationIds] = useState<Set<string>>(new Set());
-  const incidentPromptsCacheRef = useRef<Map<string, IncidentPromptsPayload>>(new Map());
-  const [lastCopiedToolByIncident, setLastCopiedToolByIncident] = useState<Record<string, IncidentDiagnosticTool>>({});
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const hasPrimedNotificationsRef = useRef(false);
@@ -242,149 +222,34 @@ export function NotificationCenter() {
     onOpenNotification(notificationId);
   }
 
-  function showCopyFeedback(message: string): void {
-    setCopyFeedback(message);
-    window.setTimeout(() => setCopyFeedback(null), 2200);
+  function showCopyFeedback(actionKey: string, message: string): void {
+    setCopyFeedbackByAction((prev) => ({ ...prev, [actionKey]: message }));
+    window.setTimeout(() => {
+      setCopyFeedbackByAction((prev) => {
+        if (!prev[actionKey]) return prev;
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
+    }, 2200);
   }
 
-  function rememberCopiedTool(incidentId: string, tool: IncidentDiagnosticTool): void {
-    setLastCopiedToolByIncident((prev) => {
-      if (prev[incidentId] === tool) return prev;
-      return { ...prev, [incidentId]: tool };
-    });
-  }
-
-  function emitIncidentToolUsage(
-    incidentId: string,
-    tool: IncidentDiagnosticTool,
-    outcome: "success" | "error"
-  ): void {
-    void postClientDiagnostic({
-      severity: outcome === "success" ? "INFO" : "WARN",
-      category: "CLIENT",
-      component: "web.notification_center",
-      eventName: "diagnostics.tool.used",
-      message: outcome === "success"
-        ? `Operator used ${incidentToolLabel(tool)}`
-        : `Operator attempted ${incidentToolLabel(tool)} but copy failed`,
-      workspaceId: "ws_demo",
-      context: {
-        incidentId,
-        tool,
-        outcome,
-        source: "notification_center"
-      }
-    });
-  }
-
-  function emitIncidentToolFeedback(
-    incidentId: string,
-    tool: IncidentDiagnosticTool,
-    helpful: boolean,
-    improvementSuggestion: string | null
-  ): void {
-    void postClientDiagnostic({
-      severity: helpful ? "INFO" : "WARN",
-      category: "CLIENT",
-      component: "web.notification_center",
-      eventName: "diagnostics.tool.feedback",
-      message: helpful
-        ? `Operator marked ${incidentToolLabel(tool)} as helpful`
-        : `Operator marked ${incidentToolLabel(tool)} as needing improvement`,
-      workspaceId: "ws_demo",
-      context: {
-        incidentId,
-        tool,
-        helpful,
-        improvementSuggestion: improvementSuggestion ?? null,
-        source: "notification_center"
-      }
-    });
-  }
-
-  async function loadIncidentPrompts(incidentId: string): Promise<IncidentPromptsPayload | null> {
-    const cached = incidentPromptsCacheRef.current.get(incidentId);
-    if (cached) return cached;
-    const response = await apiRequest<{ prompts?: unknown }>(
-      `/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/prompts`
-    );
-    const prompts = normalizeIncidentPrompts(response.prompts);
-    if (!prompts) return null;
-    incidentPromptsCacheRef.current.set(incidentId, prompts);
-    return prompts;
-  }
-
-  async function copyIncidentPacket(notificationId: string, incidentId: string): Promise<void> {
+  async function copyIncidentPacket(notificationId: string, incidentId: string, feedbackKey: string): Promise<void> {
     try {
       const response = await apiRequest<{ packet?: string }>(
         `/v1/diagnostics/incidents/${encodeURIComponent(incidentId)}/packet`
       );
       const packet = typeof response.packet === "string" ? response.packet : "";
       if (!packet) {
-        showCopyFeedback("Incident packet was empty.");
+        showCopyFeedback(feedbackKey, "Packet empty");
         return;
       }
       await navigator.clipboard.writeText(packet);
       markNotificationRead(notificationId);
-      rememberCopiedTool(incidentId, "incident_packet");
-      emitIncidentToolUsage(incidentId, "incident_packet", "success");
-      showCopyFeedback("Incident packet copied for Codex.");
+      showCopyFeedback(feedbackKey, "Copied");
     } catch {
-      emitIncidentToolUsage(incidentId, "incident_packet", "error");
-      showCopyFeedback("Could not copy incident packet.");
+      showCopyFeedback(feedbackKey, "Copy failed");
     }
-  }
-
-  async function copyIncidentPrompt(
-    notificationId: string,
-    incidentId: string,
-    kind: IncidentPromptKind
-  ): Promise<void> {
-    const tool = incidentPromptTool(kind);
-    try {
-      const prompts = await loadIncidentPrompts(incidentId);
-      if (!prompts) {
-        emitIncidentToolUsage(incidentId, tool, "error");
-        showCopyFeedback("Incident prompts were unavailable.");
-        return;
-      }
-      const prompt = prompts[kind];
-      if (!prompt) {
-        emitIncidentToolUsage(incidentId, tool, "error");
-        showCopyFeedback(`${incidentPromptLabel(kind)} prompt was empty.`);
-        return;
-      }
-      await navigator.clipboard.writeText(prompt);
-      markNotificationRead(notificationId);
-      rememberCopiedTool(incidentId, tool);
-      emitIncidentToolUsage(incidentId, tool, "success");
-      showCopyFeedback(`${incidentPromptLabel(kind)} prompt copied for Codex.`);
-    } catch {
-      emitIncidentToolUsage(incidentId, tool, "error");
-      showCopyFeedback(`Could not copy ${incidentPromptLabel(kind).toLowerCase()} prompt.`);
-    }
-  }
-
-  function submitIncidentToolFeedback(notificationId: string, incidentId: string, helpful: boolean): void {
-    const tool = lastCopiedToolByIncident[incidentId];
-    if (!tool) {
-      showCopyFeedback("Copy a packet or prompt first so feedback can be tied to a tool.");
-      return;
-    }
-    let improvementSuggestion: string | null = null;
-    if (!helpful) {
-      const response = window.prompt("How could this tool be improved? (Optional)");
-      if (response === null) return;
-      const normalized = response.trim();
-      improvementSuggestion = normalized.length > 0 ? normalized.slice(0, 280) : null;
-    }
-    markNotificationRead(notificationId);
-    emitIncidentToolFeedback(incidentId, tool, helpful, improvementSuggestion);
-    if (helpful) {
-      showCopyFeedback(`${incidentToolLabel(tool)} marked helpful.`);
-      return;
-    }
-    showCopyFeedback("Improvement feedback saved.");
   }
 
   function iconForNotification(kind: string, previewUrl?: string | null): ReactNode {
@@ -472,7 +337,6 @@ export function NotificationCenter() {
               <span className="notification-action-text">Mark all as read</span>
             </button>
           </header>
-          {copyFeedback ? <p className="muted">{copyFeedback}</p> : null}
           {markAllFeedback ? <p className="muted">{markAllFeedback}</p> : null}
 
           {notifications.length === 0 ? (
@@ -492,14 +356,22 @@ export function NotificationCenter() {
                 const isUnread = !notification.read;
                 const isFailureNotification = notification.kind === "GENERATION_FAILED" || notification.kind === "SUBMIT_FAILED";
                 const isSystemIncident = notification.kind === "SYSTEM_INCIDENT";
+                const failureSeverity = notificationFailureSeverity(
+                  notification.kind,
+                  notification.severity,
+                  failure?.category ?? null
+                );
                 const model = job?.request.model ?? null;
                 const aspectRatio = typeof job?.request.settings.aspectRatio === "string" ? job.request.settings.aspectRatio : null;
                 const resolution = typeof job?.request.settings.resolution === "string" ? job.request.settings.resolution : null;
                 const expanded = expandedNotificationId === notification.id;
+                const incidentPacketFeedbackKey = `${notification.id}:incident:packet`;
+                const copyCodexFeedbackKey = `${notification.id}:copy:codex`;
+                const copyErrorFeedbackKey = `${notification.id}:copy:error`;
                 return (
                   <article
                     key={notification.id}
-                    className={`notification-item ${isUnread ? "unread" : "read"} ${isGenerationSuccess && isUnread ? "notification-item-success" : ""} ${animatingNotificationIds.has(notification.id) ? "notification-item-enter" : ""} ${removingNotificationIds.has(notification.id) ? "notification-item-removing" : ""}`}
+                    className={`notification-item ${isUnread ? "unread" : "read"} ${isGenerationSuccess && isUnread ? "notification-item-success" : ""} ${isUnread && failureSeverity ? `notification-item-failure notification-item-failure-${failureSeverity}` : ""} ${animatingNotificationIds.has(notification.id) ? "notification-item-enter" : ""} ${removingNotificationIds.has(notification.id) ? "notification-item-removing" : ""}`}
                     onClick={() => onOpenNotification(notification.id)}
                     role="button"
                     tabIndex={0}
@@ -515,7 +387,7 @@ export function NotificationCenter() {
                       </div>
                       <div className="notification-item-content">
                         <div className="notification-item-head">
-                          <strong className={isGenerationSuccess ? "notification-title-success" : ""}>
+                          <strong className={`${isGenerationSuccess ? "notification-title-success" : ""} ${failureSeverity ? `notification-title-failure-${failureSeverity}` : ""}`.trim()}>
                             {isGenerationSuccess ? <span className="notification-success-check" aria-hidden="true">✓</span> : null}
                             {notification.title}
                           </strong>
@@ -543,61 +415,16 @@ export function NotificationCenter() {
                               className="btn"
                               type="button"
                               onClick={async (event) => {
+                                event.preventDefault();
                                 event.stopPropagation();
-                                await copyIncidentPacket(notification.id, notification.incidentId ?? "");
+                                await copyIncidentPacket(
+                                  notification.id,
+                                  notification.incidentId ?? "",
+                                  incidentPacketFeedbackKey
+                                );
                               }}
                             >
-                              Copy incident packet
-                            </button>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={async (event) => {
-                                event.stopPropagation();
-                                await copyIncidentPrompt(notification.id, notification.incidentId ?? "", "triage");
-                              }}
-                            >
-                              Copy triage prompt
-                            </button>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={async (event) => {
-                                event.stopPropagation();
-                                await copyIncidentPrompt(notification.id, notification.incidentId ?? "", "fix");
-                              }}
-                            >
-                              Copy fix prompt
-                            </button>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={async (event) => {
-                                event.stopPropagation();
-                                await copyIncidentPrompt(notification.id, notification.incidentId ?? "", "verify");
-                              }}
-                            >
-                              Copy verify prompt
-                            </button>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                submitIncidentToolFeedback(notification.id, notification.incidentId ?? "", true);
-                              }}
-                            >
-                              Helpful
-                            </button>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                submitIncidentToolFeedback(notification.id, notification.incidentId ?? "", false);
-                              }}
-                            >
-                              Needs improvement
+                              {copyFeedbackByAction[incidentPacketFeedbackKey] ?? "Copy for Codex"}
                             </button>
                           </div>
                         ) : null}
@@ -622,19 +449,18 @@ export function NotificationCenter() {
                           className="btn"
                           type="button"
                           onClick={async (event) => {
+                            event.preventDefault();
                             event.stopPropagation();
+                            markNotificationRead(notification.id);
                             try {
                               await copyGenerationFailureReport(job, { folderName });
-                              markNotificationRead(notification.id);
-                              setCopyFeedback("Diagnostics copied. Paste it into chat.");
-                              window.setTimeout(() => setCopyFeedback(null), 2200);
+                              showCopyFeedback(copyCodexFeedbackKey, "Copied");
                             } catch {
-                              setCopyFeedback("Could not copy diagnostics.");
-                              window.setTimeout(() => setCopyFeedback(null), 2200);
+                              showCopyFeedback(copyCodexFeedbackKey, "Copy failed");
                             }
                           }}
                         >
-                          Copy for Codex
+                          {copyFeedbackByAction[copyCodexFeedbackKey] ?? "Copy for Codex"}
                         </button>
                       </div>
                     ) : null}
@@ -652,6 +478,7 @@ export function NotificationCenter() {
                           type="button"
                           aria-label="Copy failure details"
                           onClick={async (event) => {
+                            event.preventDefault();
                             event.stopPropagation();
                             const lines: string[] = [
                               "AI Drive Failure Report",
@@ -701,16 +528,14 @@ export function NotificationCenter() {
                             try {
                               await navigator.clipboard.writeText(lines.join("\n"));
                               markNotificationRead(notification.id);
-                              setCopyFeedback("Failure details copied.");
-                              window.setTimeout(() => setCopyFeedback(null), 2200);
+                              showCopyFeedback(copyErrorFeedbackKey, "Copied");
                             } catch {
-                              setCopyFeedback("Could not copy failure details.");
-                              window.setTimeout(() => setCopyFeedback(null), 2200);
+                              showCopyFeedback(copyErrorFeedbackKey, "Copy failed");
                             }
                           }}
                         >
                           <span className="notification-action-glyph" aria-hidden="true">⧉</span>
-                          <span className="notification-action-text">Copy error</span>
+                          <span className="notification-action-text">{copyFeedbackByAction[copyErrorFeedbackKey] ?? "Copy error"}</span>
                         </button>
                       ) : null}
                       <button

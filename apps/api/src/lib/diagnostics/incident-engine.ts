@@ -12,6 +12,7 @@ import {
   IMMEDIATE_OPEN_SEVERITIES,
   WARN_THRESHOLD_COUNT,
   WARN_THRESHOLD_WINDOW_MS,
+  RECOVERED_FAILOVER_RATE_THRESHOLD,
   inferCauseStatusFromContext,
   isWarnThresholdEvent,
   maxSeverity,
@@ -99,7 +100,30 @@ function shouldOpenForWarn(event: DiagnosticEvent, index: DiagnosticsIndexFile):
     return Number.isFinite(ts) && (nowMs - ts) <= WARN_THRESHOLD_WINDOW_MS;
   });
   index.recentWarnByFingerprint[event.fingerprint] = next;
-  return next.length >= WARN_THRESHOLD_COUNT;
+  if (next.length < WARN_THRESHOLD_COUNT) return false;
+
+  if (event.eventName === "proxy.forward.recovered_after_failover") {
+    const recoveredCountWindow = typeof event.context.recoveredCountWindow === "number"
+      ? event.context.recoveredCountWindow
+      : null;
+    const requestCountWindow = typeof event.context.requestCountWindow === "number"
+      ? event.context.requestCountWindow
+      : null;
+    const failoverRateWindow = typeof event.context.failoverRateWindow === "number"
+      ? event.context.failoverRateWindow
+      : null;
+    if (
+      recoveredCountWindow === null ||
+      requestCountWindow === null ||
+      failoverRateWindow === null
+    ) {
+      return false;
+    }
+    if (requestCountWindow < WARN_THRESHOLD_COUNT) return false;
+    return failoverRateWindow >= RECOVERED_FAILOVER_RATE_THRESHOLD;
+  }
+
+  return true;
 }
 
 function createIncidentFromEvent(event: DiagnosticEvent): DiagnosticIncident {
@@ -203,9 +227,12 @@ type IncidentToolRollup = {
   errors: number;
   helpful: number;
   needsImprovement: number;
+  autoImproved: number;
+  deferred: number;
   lastUsedAt: string | null;
   lastFeedbackAt: string | null;
   latestImprovement: string | null;
+  lastDeferNote: string | null;
 };
 
 function toolNameFromContext(event: DiagnosticEvent): string {
@@ -237,9 +264,12 @@ function emptyToolRollup(): IncidentToolRollup {
     errors: 0,
     helpful: 0,
     needsImprovement: 0,
+    autoImproved: 0,
+    deferred: 0,
     lastUsedAt: null,
     lastFeedbackAt: null,
-    latestImprovement: null
+    latestImprovement: null,
+    lastDeferNote: null
   };
 }
 
@@ -284,6 +314,15 @@ function incidentToolFeedbackSummary(incidentId: string): string {
           rollup.latestImprovement = improvement;
         }
       }
+      if (event.context.autoImproved === true || event.context.autoImproved === "true") {
+        rollup.autoImproved += 1;
+      }
+      if (event.context.deferred === true || event.context.deferred === "true") {
+        rollup.deferred += 1;
+      }
+      if (typeof event.context.deferNote === "string" && event.context.deferNote.trim().length > 0) {
+        rollup.lastDeferNote = event.context.deferNote.trim().slice(0, 280);
+      }
     }
 
     byTool.set(tool, rollup);
@@ -294,11 +333,12 @@ function incidentToolFeedbackSummary(incidentId: string): string {
   }
 
   return [...byTool.entries()].map(([tool, rollup]) => {
-    const base = `tool=${tool} used=${rollup.used} success=${rollup.success} errors=${rollup.errors} helpful=${rollup.helpful} needsImprovement=${rollup.needsImprovement}`;
+    const base = `tool=${tool} used=${rollup.used} success=${rollup.success} errors=${rollup.errors} helpful=${rollup.helpful} needsImprovement=${rollup.needsImprovement} autoImproved=${rollup.autoImproved} deferred=${rollup.deferred}`;
     const usedAt = rollup.lastUsedAt ? ` lastUsedAt=${rollup.lastUsedAt}` : "";
     const feedbackAt = rollup.lastFeedbackAt ? ` lastFeedbackAt=${rollup.lastFeedbackAt}` : "";
     const latestImprovement = rollup.latestImprovement ? ` latestImprovement=${rollup.latestImprovement}` : "";
-    return `${base}${usedAt}${feedbackAt}${latestImprovement}`;
+    const lastDeferNote = rollup.lastDeferNote ? ` lastDeferNote=${rollup.lastDeferNote}` : "";
+    return `${base}${usedAt}${feedbackAt}${latestImprovement}${lastDeferNote}`;
   }).join("\n");
 }
 

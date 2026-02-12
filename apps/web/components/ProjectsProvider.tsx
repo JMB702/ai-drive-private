@@ -32,7 +32,8 @@ import {
   writeGridModes,
   writeStoredProjectOrder,
   writeStoredFolderOrder,
-  writeStoredTargetProjectId
+  writeStoredTargetProjectId,
+  clearStoredTargetProjectId
 } from "../lib/projects";
 import { generationFailureCategoryLabel, generationFailureForJob } from "../lib/generation-failure";
 
@@ -83,7 +84,7 @@ type ProjectsContextValue = {
   error: string | null;
   selectedProjectId: string | null;
   selectedProject: Folder | null;
-  sidebarFocus: "dashboard" | "folder";
+  sidebarFocus: "dashboard" | "folder" | "all-images";
   projectSelectionToken: number;
   createModalOpen: boolean;
   selectedAsset: Asset | null;
@@ -97,8 +98,10 @@ type ProjectsContextValue = {
   reorderSidebarFolders: (draggedFolderId: string, targetIndex: number) => void;
   reorderDashboardFolders: (draggedFolderIds: string[], targetIndex: number) => void;
   selectProject: (projectId: string) => void;
+  selectHome: () => void;
   setSidebarFocusDashboard: () => void;
   setSidebarFocusFolder: () => void;
+  setSidebarFocusAllImages: () => void;
   setSelectedGridMode: (mode: GridMode) => void;
   setDraggedItemIds: (itemIds: string[]) => void;
   toggleAssetSelection: (assetId: string) => void;
@@ -579,7 +582,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [sidebarFocus, setSidebarFocus] = useState<"dashboard" | "folder">("dashboard");
+  const [sidebarFocus, setSidebarFocus] = useState<"dashboard" | "folder" | "all-images">("dashboard");
   const [projectSelectionToken, setProjectSelectionToken] = useState(0);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -934,6 +937,18 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
   const setSidebarFocusFolder = useCallback((): void => {
     setSidebarFocus("folder");
+  }, []);
+
+  const setSidebarFocusAllImages = useCallback((): void => {
+    setSidebarFocus("all-images");
+  }, []);
+
+  const selectHome = useCallback((): void => {
+    setSelectedProjectId(null);
+    clearStoredTargetProjectId();
+    setSelectedAssetIds([]);
+    setSidebarFocus("dashboard");
+    setProjectSelectionToken((value) => value + 1);
   }, []);
 
   async function renameProject(projectId: string, name: string): Promise<void> {
@@ -1714,8 +1729,10 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     reorderSidebarFolders,
     reorderDashboardFolders,
     selectProject,
+    selectHome,
     setSidebarFocusDashboard,
     setSidebarFocusFolder,
+    setSidebarFocusAllImages,
     setSelectedGridMode,
     setDraggedItemIds,
     toggleAssetSelection,

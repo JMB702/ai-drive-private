@@ -12,6 +12,18 @@ import { ClientErrorBoundary } from "./ClientErrorBoundary";
 
 function runtimeTabTitle(hostname: string): string {
   const normalized = hostname.trim().toLowerCase();
+  const ipv4Match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  const isPrivateIpv4 = (() => {
+    if (!ipv4Match) return false;
+    const octets = ipv4Match.slice(1).map((value) => Number(value));
+    if (octets.some((value) => !Number.isFinite(value) || value < 0 || value > 255)) return false;
+    const [a, b] = octets;
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    return false;
+  })();
   if (
     normalized === "localhost" ||
     normalized === "127.0.0.1" ||
@@ -19,6 +31,9 @@ function runtimeTabTitle(hostname: string): string {
     normalized.endsWith(".local")
   ) {
     return "Working";
+  }
+  if (isPrivateIpv4) {
+    return "Working Mobile";
   }
   return "Deployed";
 }

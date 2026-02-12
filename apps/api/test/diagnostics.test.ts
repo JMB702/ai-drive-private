@@ -148,6 +148,71 @@ describe("diagnostics core", () => {
     expect(four?.incident?.id).toBe(three?.incident?.id);
   });
 
+  it("opens recovered failover incident only when repeat threshold and failover-rate threshold are both met", () => {
+    const emitter = new DiagnosticsEmitter();
+    const lowRate = emitter.emit({
+      severity: "WARN",
+      category: "PROXY",
+      component: "web.api_proxy",
+      eventName: "proxy.forward.recovered_after_failover",
+      message: "Proxy request recovered after failover",
+      workspaceId: "ws_demo",
+      context: {
+        route: "/v1/versions/asset_1",
+        requestCountWindow: 30,
+        recoveredCountWindow: 3,
+        failoverRateWindow: 0.1
+      }
+    });
+    const lowRate2 = emitter.emit({
+      severity: "WARN",
+      category: "PROXY",
+      component: "web.api_proxy",
+      eventName: "proxy.forward.recovered_after_failover",
+      message: "Proxy request recovered after failover",
+      workspaceId: "ws_demo",
+      context: {
+        route: "/v1/versions/asset_1",
+        requestCountWindow: 31,
+        recoveredCountWindow: 4,
+        failoverRateWindow: 0.12
+      }
+    });
+    const lowRate3 = emitter.emit({
+      severity: "WARN",
+      category: "PROXY",
+      component: "web.api_proxy",
+      eventName: "proxy.forward.recovered_after_failover",
+      message: "Proxy request recovered after failover",
+      workspaceId: "ws_demo",
+      context: {
+        route: "/v1/versions/asset_1",
+        requestCountWindow: 32,
+        recoveredCountWindow: 5,
+        failoverRateWindow: 0.15
+      }
+    });
+    expect(lowRate?.incident).toBeNull();
+    expect(lowRate2?.incident).toBeNull();
+    expect(lowRate3?.incident).toBeNull();
+
+    const highRate = emitter.emit({
+      severity: "WARN",
+      category: "PROXY",
+      component: "web.api_proxy",
+      eventName: "proxy.forward.recovered_after_failover",
+      message: "Proxy request recovered after failover",
+      workspaceId: "ws_demo",
+      context: {
+        route: "/v1/versions/asset_1",
+        requestCountWindow: 15,
+        recoveredCountWindow: 4,
+        failoverRateWindow: 0.2667
+      }
+    });
+    expect(highRate?.incident).toBeTruthy();
+  });
+
   it("prunes event files older than 30 days and keeps recent files", () => {
     const diagnosticsDir = path.join(dataDir, "diagnostics");
     mkdirSync(diagnosticsDir, { recursive: true });
@@ -424,6 +489,74 @@ describe("diagnostics integration", () => {
     expect(packet).toContain("tool=triage_prompt used=1 success=1");
     expect(packet).toContain("needsImprovement=1");
     expect(packet).toContain("latestImprovement=Add faster root-cause hint.");
+  });
+
+  it("ingests agent usage report text and records tool usage/feedback events", async () => {
+    app.ctx.store.workspaceMembers.push(
+      { workspaceId: "ws_demo", userId: "owner_agent", role: "OWNER", joinedAt: new Date().toISOString() }
+    );
+    app.ctx.diagnostics.emit({
+      severity: "HIGH",
+      category: "PROXY",
+      component: "web.api_proxy",
+      eventName: "proxy.forward.timeout",
+      message: "Proxy timed out",
+      workspaceId: "ws_demo",
+      context: {
+        route: "/v1/versions/asset_2",
+        statusCode: 504
+      }
+    });
+    const incident = listDiagnosticIncidents({ status: "OPEN", limit: 10 })[0];
+    expect(incident).toBeTruthy();
+
+    const reportText = [
+      "DIAGNOSTICS_TOOL_USAGE",
+      "tool=incident_packet, endpoint=/v1/diagnostics/incidents/123/packet, purpose=incident context, outcome=success, helpfulness=5, autoImproved=true",
+      "tool=triage_prompt, endpoint=/v1/diagnostics/incidents/123/prompts, purpose=root-cause triage, outcome=success, helpfulness=2, improvement=add narrower hints, deferred=true, deferNote=requires repo-wide context",
+      "diagnosticsEvidenceComplete=true"
+    ].join("\n");
+
+    const ingestRes = await app.inject({
+      method: "POST",
+      url: `/v1/diagnostics/incidents/${incident.id}/agent-report`,
+      headers: { "x-user-id": "owner_agent" },
+      payload: {
+        agentId: "codex-agent",
+        reportText
+      }
+    });
+    expect(ingestRes.statusCode).toBe(202);
+    expect(ingestRes.json().toolCount).toBe(2);
+    expect(ingestRes.json().usedEvents).toBe(2);
+    expect(ingestRes.json().feedbackEvents).toBe(2);
+
+    const usedEvents = listDiagnosticEvents({
+      eventName: "diagnostics.tool.used",
+      incidentId: incident.id,
+      limit: 20
+    }).events;
+    expect(usedEvents.length).toBeGreaterThanOrEqual(2);
+    const feedbackEvents = listDiagnosticEvents({
+      eventName: "diagnostics.tool.feedback",
+      incidentId: incident.id,
+      limit: 20
+    }).events;
+    expect(feedbackEvents.length).toBeGreaterThanOrEqual(2);
+
+    const packetRes = await app.inject({
+      method: "GET",
+      url: `/v1/diagnostics/incidents/${incident.id}/packet`,
+      headers: { "x-user-id": "owner_agent" }
+    });
+    expect(packetRes.statusCode).toBe(200);
+    const packet = String(packetRes.json().packet ?? "");
+    expect(packet).toContain("tool=incident_packet used=1");
+    expect(packet).toContain("tool=triage_prompt used=1");
+    expect(packet).toContain("autoImproved=1");
+    expect(packet).toContain("deferred=1");
+    expect(packet).toContain("latestImprovement=add narrower hints");
+    expect(packet).toContain("lastDeferNote=requires repo-wide context");
   });
 
   it("acknowledges and resolves incidents through diagnostics routes", async () => {

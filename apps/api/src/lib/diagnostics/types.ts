@@ -73,6 +73,7 @@ export type IncidentPatch = {
 export const DIAGNOSTICS_RETENTION_DAYS = 30;
 export const WARN_THRESHOLD_COUNT = 3;
 export const WARN_THRESHOLD_WINDOW_MS = 5 * 60 * 1000;
+export const RECOVERED_FAILOVER_RATE_THRESHOLD = 0.2;
 export const TRACE_HEADER_NAME = "x-aidrive-trace-id";
 
 export const IMMEDIATE_OPEN_SEVERITIES: ReadonlySet<DiagnosticSeverity> = new Set(["CRITICAL", "HIGH"]);

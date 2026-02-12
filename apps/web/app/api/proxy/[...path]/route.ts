@@ -8,7 +8,44 @@ export const runtime = "nodejs";
 
 const DEFAULT_TARGETS = ["http://127.0.0.1:4100", "http://127.0.0.1:4000"];
 const PROXY_FORWARD_TIMEOUT_MS = Math.max(1_000, Number(process.env.AIDRIVE_PROXY_TIMEOUT_MS ?? 12_000));
+const PROXY_FAILOVER_WINDOW_MS = 5 * 60 * 1000;
 const TRACE_HEADER_NAME = "x-aidrive-trace-id";
+
+const proxyRouteWindow = new Map<string, { requestTimestamps: number[]; recoveredTimestamps: number[] }>();
+
+function routeWindow(route: string): { requestTimestamps: number[]; recoveredTimestamps: number[] } {
+  let current = proxyRouteWindow.get(route);
+  if (current) return current;
+  current = { requestTimestamps: [], recoveredTimestamps: [] };
+  proxyRouteWindow.set(route, current);
+  return current;
+}
+
+function pruneWindow(values: number[], nowMs: number): number[] {
+  return values.filter((ts) => nowMs - ts <= PROXY_FAILOVER_WINDOW_MS);
+}
+
+function markProxyRouteObservation(route: string, recovered: boolean): {
+  requestCountWindow: number;
+  recoveredCountWindow: number;
+  failoverRateWindow: number;
+} {
+  const nowMs = Date.now();
+  const current = routeWindow(route);
+  current.requestTimestamps = pruneWindow([...current.requestTimestamps, nowMs], nowMs);
+  current.recoveredTimestamps = pruneWindow(
+    recovered ? [...current.recoveredTimestamps, nowMs] : current.recoveredTimestamps,
+    nowMs
+  );
+  const requestCountWindow = current.requestTimestamps.length;
+  const recoveredCountWindow = current.recoveredTimestamps.length;
+  const failoverRateWindow = requestCountWindow > 0 ? recoveredCountWindow / requestCountWindow : 0;
+  return {
+    requestCountWindow,
+    recoveredCountWindow,
+    failoverRateWindow: Number(failoverRateWindow.toFixed(4))
+  };
+}
 
 function proxyFallbackEnabled(): boolean {
   const raw = process.env.AIDRIVE_ENABLE_PROXY_FALLBACK;
@@ -351,11 +388,13 @@ function createLocalFailedAsset(params: {
 
 function imageModelForPrompt(model: string): string {
   const key = model.toLowerCase();
+  if (key.includes("nano banana pro")) return "gemini-3-pro-image-preview";
   if (key.includes("nano banana")) return "gemini-2.5-flash-image";
-  return "gemini-2.0-flash-preview-image-generation";
+  return "gemini-2.5-flash-image";
 }
 
 async function tryGeminiDataUrl(prompt: string, model: string, aspectRatio: string): Promise<string | null> {
+  if (model.toLowerCase().includes("a2e")) return null;
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
@@ -715,7 +754,9 @@ function localFallback(
             }
             if (!previewUrl) {
               job.status = "FAILED";
-              job.error = "Gemini image generation failed";
+              job.error = model.toLowerCase().includes("a2e")
+                ? "A2E image generation failed"
+                : "Gemini image generation failed";
               job.updatedAt = nowIso();
               createLocalFailedAsset({
                 workspaceId,
@@ -826,6 +867,7 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
   const route = routeFromPath(pathSegments);
   const suffix = `${route}${qs}`;
   const traceId = traceIdFromRequest(request);
+  const isInternalDiagnosticsRoute = route.startsWith("/v1/diagnostics/");
 
   const headers = new Headers(request.headers);
   headers.delete("host");
@@ -839,6 +881,10 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
 
   let lastError: unknown = null;
   let lastServerFailure: { status: number; headers: Headers; body: ArrayBuffer } | null = null;
+  let primaryStatusCode: number | null = null;
+  let primaryLatencyMs: number | null = null;
+  let primaryFailureReason: string | null = null;
+  const attemptFailureReasons: string[] = [];
   const targets = targetBaseUrls();
   const fallbackAllowed = proxyFallbackEnabled();
 
@@ -866,6 +912,13 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
 
       const responseBody = await upstream.arrayBuffer();
       if (upstream.status >= 500) {
+        const failureReason = "upstream_5xx";
+        attemptFailureReasons.push(failureReason);
+        if (attempt === 1) {
+          primaryStatusCode = upstream.status;
+          primaryLatencyMs = latencyMs;
+          primaryFailureReason = failureReason;
+        }
         lastServerFailure = { status: upstream.status, headers: responseHeaders, body: responseBody };
         void emitServerDiagnostic({
           severity: "WARN",
@@ -881,6 +934,8 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
             baseUrl: base,
             attempt,
             attemptsTotal: targets.length,
+            primaryBase: targets[0] ?? null,
+            failureReason,
             statusCode: upstream.status,
             latencyMs,
             timeoutMs: PROXY_FORWARD_TIMEOUT_MS
@@ -889,9 +944,10 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
         continue;
       }
 
+      const routeWindowStats = markProxyRouteObservation(route, attempt > 1);
       if (attempt > 1) {
         void emitServerDiagnostic({
-          severity: "WARN",
+          severity: isInternalDiagnosticsRoute ? "INFO" : "WARN",
           category: "PROXY",
           component: "web.api_proxy",
           eventName: "proxy.forward.recovered_after_failover",
@@ -902,10 +958,22 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
             route,
             method,
             baseUrl: base,
-            attempt,
+            primaryBase: targets[0] ?? null,
+            fallbackBase: base,
+            attemptCount: attempt,
             attemptsTotal: targets.length,
             statusCode: upstream.status,
-            latencyMs,
+            fallbackStatus: upstream.status,
+            fallbackLatencyMs: latencyMs,
+            primaryStatusCode,
+            primaryLatencyMs,
+            primaryFailureReason: primaryFailureReason ?? "unknown",
+            failureReason: primaryFailureReason ?? "unknown",
+            attemptFailureReasons: attemptFailureReasons.slice(0, 5).join(","),
+            requestCountWindow: routeWindowStats.requestCountWindow,
+            recoveredCountWindow: routeWindowStats.recoveredCountWindow,
+            failoverRateWindow: routeWindowStats.failoverRateWindow,
+            userImpact: !isInternalDiagnosticsRoute,
             timeoutMs: PROXY_FORWARD_TIMEOUT_MS
           }
         });
@@ -919,6 +987,13 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
       lastError = error;
       const latencyMs = Math.max(0, Date.now() - startedAt);
       const timedOut = error instanceof Error && error.name === "AbortError";
+      const failureReason = timedOut ? "timeout" : "network_error";
+      attemptFailureReasons.push(failureReason);
+      if (attempt === 1) {
+        primaryStatusCode = null;
+        primaryLatencyMs = latencyMs;
+        primaryFailureReason = failureReason;
+      }
       void emitServerDiagnostic({
         severity: timedOut ? "WARN" : "HIGH",
         category: "PROXY",
@@ -933,6 +1008,8 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
           baseUrl: base,
           attempt,
           attemptsTotal: targets.length,
+          primaryBase: targets[0] ?? null,
+          failureReason,
           latencyMs,
           timeoutMs: PROXY_FORWARD_TIMEOUT_MS,
           error: error instanceof Error ? error.message : String(error)
@@ -944,6 +1021,7 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
   }
 
   if (lastServerFailure) {
+    markProxyRouteObservation(route, false);
     lastServerFailure.headers.set(TRACE_HEADER_NAME, traceId);
     void emitServerDiagnostic({
       severity: "HIGH",
@@ -956,8 +1034,12 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
       context: {
         route,
         method,
+        primaryBase: targets[0] ?? null,
         statusCode: lastServerFailure.status,
         attemptsTotal: targets.length,
+        primaryStatusCode,
+        primaryLatencyMs,
+        primaryFailureReason: primaryFailureReason ?? "upstream_5xx",
         timeoutMs: PROXY_FORWARD_TIMEOUT_MS
       }
     });
@@ -970,6 +1052,7 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
   if (fallbackAllowed) {
     const fallback = localFallback(method, pathSegments, body);
     if (fallback) {
+      const routeWindowStats = markProxyRouteObservation(route, false);
       fallback.headers.set("x-aidrive-proxy-fallback", "1");
       fallback.headers.set(TRACE_HEADER_NAME, traceId);
       void emitServerDiagnostic({
@@ -983,7 +1066,11 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
         context: {
           route,
           method,
+          primaryBase: targets[0] ?? null,
           attemptsTotal: targets.length,
+          requestCountWindow: routeWindowStats.requestCountWindow,
+          recoveredCountWindow: routeWindowStats.recoveredCountWindow,
+          failoverRateWindow: routeWindowStats.failoverRateWindow,
           timeoutMs: PROXY_FORWARD_TIMEOUT_MS,
           fallbackReason: lastError instanceof Error ? lastError.message : "upstream_unavailable"
         }
@@ -1003,6 +1090,7 @@ async function forward(request: NextRequest, pathSegments: string[]): Promise<Ne
     context: {
       route,
       method,
+      primaryBase: targets[0] ?? null,
       attemptsTotal: targets.length,
       timeoutMs: PROXY_FORWARD_TIMEOUT_MS,
       fallbackEnabled: fallbackAllowed,

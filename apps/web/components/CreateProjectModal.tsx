@@ -9,11 +9,14 @@ export function CreateProjectModal() {
   const [busy, setBusy] = useState(false);
   const forceCreate = folders.length === 0;
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (createModalOpen && !name) {
+    // Set a default name only once when the modal opens, not while editing.
+    if (createModalOpen && !wasOpenRef.current && !name) {
       setName("Project 01");
     }
+    wasOpenRef.current = createModalOpen;
   }, [createModalOpen, name]);
 
   useEffect(() => {

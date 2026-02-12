@@ -609,7 +609,8 @@ export function FolderAssetGrid({ scope = "project" }: FolderAssetGridProps) {
         detail: {
           id: asset.id,
           name: asset.name,
-          dataUrl
+          dataUrl,
+          sourceUrl: resolveAssetPreview(asset)
         }
       }));
       setMessage("Sent to Generate panel as reference.");
