@@ -161,6 +161,13 @@ function extensionToMimeType(extension: string): string {
 }
 
 function parseImageDataUrl(dataUrl: string): { mimeType: string; bytes: Buffer } | null {
+  if (dataUrl.startsWith("data:image/svg+xml;utf8,")) {
+    const svg = decodeSvgDataUrl(dataUrl);
+    if (!svg) return null;
+    const bytes = Buffer.from(svg, "utf8");
+    if (bytes.length === 0) return null;
+    return { mimeType: "image/svg+xml", bytes };
+  }
   const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/);
   if (!match) return null;
   const mimeType = match[1].toLowerCase();
@@ -197,6 +204,7 @@ function decodeSvgDataUrl(dataUrl: string): string | null {
 function extractEmbeddedRasterDataUrl(svgDataUrl: string): string | null {
   const svg = decodeSvgDataUrl(svgDataUrl);
   if (!svg) return null;
+  if (/data-aidrive-keep-ratio=["']1["']/i.test(svg)) return null;
   const imageHrefMatch = svg.match(/<image\b[^>]*\b(?:href|xlink:href)=["']([^"']+)["'][^>]*>/i);
   const embeddedHref = imageHrefMatch?.[1];
   if (!embeddedHref || !embeddedHref.startsWith("data:image/")) return null;
@@ -311,15 +319,25 @@ export function sanitizeInlinePreviewMetadata<T extends PreviewMetadata>(metadat
         }
       }
     } else {
-      const embeddedRasterDataUrl = extractEmbeddedRasterDataUrl(previewDataUrl);
-      if (embeddedRasterDataUrl) {
-        const blobKey = persistPreviewBlob(embeddedRasterDataUrl);
-        if (blobKey) {
-          delete mutable.previewDataUrl;
-          mutable.previewBlob = blobKey;
-          mutable.previewUrl = previewBlobUrl(blobKey);
-          mutable.inlinePreviewExternalized = true;
-          mutable.inlinePreviewEmbeddedImage = true;
+      const svgBlobKey = persistPreviewBlob(previewDataUrl);
+      if (svgBlobKey) {
+        delete mutable.previewDataUrl;
+        mutable.previewBlob = svgBlobKey;
+        mutable.previewUrl = previewBlobUrl(svgBlobKey);
+        mutable.inlinePreviewExternalized = true;
+      }
+
+      if (typeof mutable.previewDataUrl === "string") {
+        const embeddedRasterDataUrl = extractEmbeddedRasterDataUrl(previewDataUrl);
+        if (embeddedRasterDataUrl) {
+          const blobKey = persistPreviewBlob(embeddedRasterDataUrl);
+          if (blobKey) {
+            delete mutable.previewDataUrl;
+            mutable.previewBlob = blobKey;
+            mutable.previewUrl = previewBlobUrl(blobKey);
+            mutable.inlinePreviewExternalized = true;
+            mutable.inlinePreviewEmbeddedImage = true;
+          }
         }
       }
       if (typeof mutable.previewDataUrl === "string" && !isPersistableInlinePreviewDataUrl(mutable.previewDataUrl)) {

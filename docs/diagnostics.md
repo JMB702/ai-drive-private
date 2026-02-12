@@ -66,6 +66,13 @@ Aggregation behavior:
 - `WARN` events open incidents only when the same fingerprint repeats at least 3 times within 5 minutes for timeout/rate-limit/network/proxy/fallback patterns.
 - New events merge into existing `OPEN`/`ACKED` incidents by fingerprint.
 
+Aspect-ratio integrity signals:
+
+- `generation.output.aspect_ratio_mismatch_detected`
+  - emitted as `CRITICAL` when provider metadata indicates ratio correction/fallback was required for an image output.
+- `asset.preview.aspect_ratio_mismatch_detected`
+  - emitted as `CRITICAL` by the web grid when loaded image dimensions do not match requested `aspectRatio`, including a flag when the grid still appears aligned (likely crop masking).
+
 ## Redaction Policy
 
 Diagnostics are redacted by default:

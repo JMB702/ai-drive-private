@@ -135,6 +135,13 @@ function requestTraceId(request: { headers: Record<string, unknown> }): string |
   return null;
 }
 
+function traceIdFromJob(job: GenerationJob): string | null {
+  const candidate = job.request.settings?.__traceId;
+  if (typeof candidate !== "string") return null;
+  const trimmed = candidate.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 120) : null;
+}
+
 export async function registerGenerationRoutes(app: FastifyInstance): Promise<void> {
   const finalizedJobs = new Map<string, number>();
   let lastFinalizedPressureWarning = 0;
@@ -225,13 +232,38 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
     if (job.status === "SUCCEEDED" && job.result) {
       const actual = Math.max(1, Math.floor(creditCost * 0.9));
       finalizeCredits(app.ctx.store, workspaceId, jobId, creditCost, actual);
+      const requestedAspectRatio = typeof body.settings.aspectRatio === "string" ? body.settings.aspectRatio : "1:1";
+      const providerMetadata = job.result.providerMetadata ?? {};
+      const providerRatioMismatch = providerMetadata.ratioMismatch === true;
+      if (body.type === "IMAGE" && providerRatioMismatch) {
+        app.ctx.diagnostics.emit({
+          severity: "CRITICAL",
+          category: "GENERATION",
+          component: "generation.routes",
+          eventName: "generation.output.aspect_ratio_mismatch_detected",
+          message: "Generated image required ratio correction and may appear cropped",
+          workspaceId,
+          requestId: job.id,
+          traceId: traceIdFromJob(job),
+          context: {
+            route: "/v1/generation/jobs",
+            jobId: job.id,
+            model: body.model,
+            requestedAspectRatio,
+            provider: typeof providerMetadata.provider === "string" ? providerMetadata.provider : null,
+            providerMode: typeof providerMetadata.mode === "string" ? providerMetadata.mode : null,
+            providerRatioMismatch,
+            outputMimeType: job.result.outputMimeType
+          }
+        });
+      }
 
       if (body.assetId) {
         const metadata = {
-          ...job.result.providerMetadata,
+          ...providerMetadata,
           prompt: body.prompt,
           model: body.model,
-          aspectRatio: typeof body.settings.aspectRatio === "string" ? body.settings.aspectRatio : "1:1",
+          aspectRatio: requestedAspectRatio,
           resolution: typeof body.settings.resolution === "string" ? body.settings.resolution : "1K",
           quality: typeof body.settings.quality === "string" ? body.settings.quality : "1K"
         };
@@ -265,10 +297,10 @@ export async function registerGenerationRoutes(app: FastifyInstance): Promise<vo
         ];
 
         const metadata = {
-          ...job.result.providerMetadata,
+          ...providerMetadata,
           prompt: body.prompt,
           model: body.model,
-          aspectRatio: typeof body.settings.aspectRatio === "string" ? body.settings.aspectRatio : "1:1",
+          aspectRatio: requestedAspectRatio,
           resolution: typeof body.settings.resolution === "string" ? body.settings.resolution : "1K",
           quality: typeof body.settings.quality === "string" ? body.settings.quality : "1K"
         };

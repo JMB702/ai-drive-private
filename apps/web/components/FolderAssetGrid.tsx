@@ -23,6 +23,7 @@ import {
   generationFailureCategoryLabel,
   generationFailureForJob
 } from "../lib/generation-failure";
+import { postClientDiagnostic } from "../lib/diagnostics-client";
 import { useProjects } from "./ProjectsProvider";
 
 type UndoState = {
@@ -46,6 +47,7 @@ const GRID_TILE_HEIGHT_MAX = 280;
 const GRID_TILE_HEIGHT_DEFAULT = 190;
 const GRID_ZOOM_PERCENT_MIN = 20;
 const GRID_ZOOM_PERCENT_MAX = 100;
+const ASPECT_RATIO_MISMATCH_THRESHOLD = 0.04;
 
 type FolderAssetGridProps = {
   scope?: "project" | "all";
@@ -99,6 +101,12 @@ function parseRatioFromDataUrl(dataUrl?: string): number | null {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function aspectRatioDelta(expected: number, actual: number): number {
+  if (!Number.isFinite(expected) || expected <= 0) return 0;
+  if (!Number.isFinite(actual) || actual <= 0) return 0;
+  return Math.abs(actual - expected) / expected;
 }
 
 function tileHeightToZoomPercent(tileHeight: number): number {
@@ -189,6 +197,7 @@ export function FolderAssetGrid({ scope = "project" }: FolderAssetGridProps) {
   const lastAssetIdsRef = useRef<string[]>([]);
   const draggingIdsRef = useRef<string[]>([]);
   const hoveredAssetIdRef = useRef<string | null>(null);
+  const reportedAspectMismatchRef = useRef<Set<string>>(new Set());
   const scopedSelectedAssetIds = isAllImagesScope ? allScopeSelectedAssetIds : selectedAssetIds;
   const scopedSelectionActive = scopedSelectedAssetIds.length > 0;
   const scopeGridKey = isAllImagesScope ? "__all__" : (selectedProject?.id ?? "__none__");
@@ -1012,6 +1021,49 @@ export function FolderAssetGrid({ scope = "project" }: FolderAssetGridProps) {
     });
   }
 
+  function reportAspectRatioMismatchIfNeeded(
+    asset: Asset,
+    imageWidth: number,
+    imageHeight: number,
+    gridRatio: number
+  ): void {
+    const expectedRatio = parseAspectRatioOrNull(asset.aspectRatio);
+    if (!expectedRatio || !Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth <= 0 || imageHeight <= 0) {
+      return;
+    }
+    const actualRatio = imageWidth / imageHeight;
+    const actualDelta = aspectRatioDelta(expectedRatio, actualRatio);
+    if (actualDelta < ASPECT_RATIO_MISMATCH_THRESHOLD) return;
+
+    const signature = `${asset.id}:${Math.round(expectedRatio * 1000)}:${Math.round(actualRatio * 1000)}`;
+    if (reportedAspectMismatchRef.current.has(signature)) return;
+    reportedAspectMismatchRef.current.add(signature);
+
+    const gridDelta = aspectRatioDelta(expectedRatio, gridRatio);
+    const looksAlignedInGrid = gridDelta < ASPECT_RATIO_MISMATCH_THRESHOLD;
+    void postClientDiagnostic({
+      severity: "CRITICAL",
+      category: "CLIENT",
+      component: "web.asset_grid",
+      eventName: "asset.preview.aspect_ratio_mismatch_detected",
+      message: "Image dimensions differ from requested aspect ratio",
+      workspaceId: WORKSPACE_ID,
+      context: {
+        assetId: asset.id,
+        expectedAspectRatio: asset.aspectRatio ?? null,
+        expectedRatio: Number(expectedRatio.toFixed(4)),
+        actualRatio: Number(actualRatio.toFixed(4)),
+        ratioDeltaPct: Number((actualDelta * 100).toFixed(2)),
+        naturalWidth: imageWidth,
+        naturalHeight: imageHeight,
+        gridRatio: Number(gridRatio.toFixed(4)),
+        gridDeltaPct: Number((gridDelta * 100).toFixed(2)),
+        looksAlignedInGrid,
+        previewKind: typeof asset.previewUrl === "string" && asset.previewUrl.startsWith("data:") ? "inline_data_url" : "url"
+      }
+    });
+  }
+
   function onChangeGridSize(nextZoomPercent: number): void {
     const next = zoomPercentToTileHeight(Math.round(nextZoomPercent));
     setGridTileHeightByScope((prev) => ({ ...prev, [scopeGridKey]: next }));
@@ -1350,6 +1402,7 @@ export function FolderAssetGrid({ scope = "project" }: FolderAssetGridProps) {
                       // Cached images can already be complete before onLoad fires.
                       if (element.complete && element.naturalWidth > 0) {
                         markImageLoaded(asset!.id);
+                        reportAspectRatioMismatchIfNeeded(asset!, element.naturalWidth, element.naturalHeight, ratioFromAsset);
                       }
                     }}
                     src={resolveAssetPreview(asset!)}
@@ -1360,6 +1413,12 @@ export function FolderAssetGrid({ scope = "project" }: FolderAssetGridProps) {
                     style={{ objectFit: "cover", objectPosition: "center" }}
                     onLoad={(event) => {
                       markImageLoaded(asset!.id);
+                      reportAspectRatioMismatchIfNeeded(
+                        asset!,
+                        event.currentTarget.naturalWidth,
+                        event.currentTarget.naturalHeight,
+                        ratioFromAsset
+                      );
                     }}
                     onError={(event) => {
                       const element = event.currentTarget;

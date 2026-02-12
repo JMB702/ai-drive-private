@@ -579,7 +579,11 @@ describe("api route integration", () => {
       .find((asset: { folderId: string; name: string }) => asset.folderId === targetFolder.id && /^.+-\d{4}\.png$/i.test(asset.name));
     expect(created).toBeDefined();
     expect(assetsRes.json().aspectRatios[created.id]).toBe("9:16");
-    expect(String(assetsRes.json().previews[created.id] ?? "")).toContain("data:image/svg+xml");
+    const preview = String(assetsRes.json().previews[created.id] ?? "");
+    expect(
+      preview.includes("data:image/svg+xml") ||
+      /^\/v1\/previews\/[a-f0-9]{40}\.svg$/i.test(preview)
+    ).toBe(true);
   });
 
   it("deletes failed generation jobs", async () => {

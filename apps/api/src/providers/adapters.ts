@@ -1006,7 +1006,31 @@ async function generateA2EImageDataUrl(apiKey: string, baseUrl: string, request:
     throw new Error(`A2E did not return image URL.${status}${suffix}${detail}`);
   }
 
-  const previewDataUrl = await fetchImageAsDataUrl(imageUrl, request);
+  let previewDataUrl = await fetchImageAsDataUrl(imageUrl, request);
+  const shouldForceRequestedRatioForNoReference =
+    referenceHttpUrls.length === 0 &&
+    requestedAspectRatio !== "auto" &&
+    aspectRatio !== "1:1" &&
+    !isSvgDataUrl(previewDataUrl) &&
+    !isAspectRatioSatisfied(aspectRatio, previewDataUrl);
+  if (shouldForceRequestedRatioForNoReference) {
+    previewDataUrl = wrapImageInAspectRatio(previewDataUrl, aspectRatio);
+    emitProviderDiagnostic({
+      severity: "WARN",
+      eventName: "provider.aspect_ratio_fallback",
+      message: "A2E image ratio mismatch was corrected by SVG wrapper",
+      workspaceId: request.workspaceId,
+      traceId,
+      context: {
+        provider: "a2e",
+        model: request.model,
+        route: "/api/v1/userText2image/start",
+        requestedAspectRatio: aspectRatio,
+        fallback: "svg_wrapper",
+        referenceImageCount: referenceHttpUrls.length
+      }
+    });
+  }
   if (isA2EJobComplete(state.status) || isA2EJobPending(state.status) || !state.status) {
     return { previewDataUrl, taskId: state.taskId, referenceImageCount: referenceHttpUrls.length };
   }
